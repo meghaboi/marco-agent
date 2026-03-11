@@ -108,8 +108,8 @@ class FoundryChatClient:
             raise RuntimeError("No choices returned from Azure AI Foundry.")
 
         message = response.choices[0].message
-        content = _extract_content(message.content)
         tool_calls, tool_call_payloads = _extract_tool_calls(message)
+        content = _extract_response_content(message, has_tool_calls=bool(tool_calls))
 
         assistant_message: dict[str, Any] = {"role": "assistant"}
         if content:
@@ -137,6 +137,17 @@ def _extract_content(content: Any) -> str:
     if content is None:
         return ""
     return str(content).strip()
+
+
+def _extract_response_content(message: Any, *, has_tool_calls: bool) -> str:
+    content = _extract_content(_read_value(message, "content"))
+    if content:
+        return content
+    # Some providers (including Kimi on Azure OpenAI-compatible endpoints)
+    # may return the final user-facing post-tool text in `reasoning_content`.
+    if has_tool_calls:
+        return ""
+    return _extract_content(_read_value(message, "reasoning_content"))
 
 
 def _extract_content_item_text(item: Any) -> str:

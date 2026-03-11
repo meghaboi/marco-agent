@@ -1,4 +1,9 @@
-from marco_agent.ai.foundry import FoundryChatClient, _extract_content, _extract_tool_calls
+from marco_agent.ai.foundry import (
+    FoundryChatClient,
+    _extract_content,
+    _extract_response_content,
+    _extract_tool_calls,
+)
 
 
 def test_foundry_client_uses_openai_v1_mode_for_v1_endpoint() -> None:
@@ -60,3 +65,19 @@ def test_extract_tool_calls_handles_legacy_function_call() -> None:
     assert calls[0].name == "task_list"
     assert calls[0].arguments_json == "{}"
     assert payloads[0]["type"] == "function"
+
+
+def test_extract_response_content_uses_reasoning_content_when_content_missing() -> None:
+    message = {
+        "content": None,
+        "reasoning_content": "You currently have no tasks.",
+    }
+    assert _extract_response_content(message, has_tool_calls=False) == "You currently have no tasks."
+
+
+def test_extract_response_content_ignores_reasoning_when_tool_calls_exist() -> None:
+    message = {
+        "content": None,
+        "reasoning_content": "internal planning text",
+    }
+    assert _extract_response_content(message, has_tool_calls=True) == ""
