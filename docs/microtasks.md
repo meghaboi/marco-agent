@@ -14,18 +14,20 @@ This backlog is ordered for shipping a reliable v1 on Azure.
 ## Phase 1 - Core Assistant Loop
 
 1. Implement slash commands: `/task`, `/brief`, `/model`, `/memory`.
-2. Add robust command parser for natural-language task actions.
-3. Add conversation memory retrieval pipeline (recent + semantic).
-4. Add structured logs + correlation IDs + App Insights hooks.
-5. Add unit/integration tests for DM auth, config validation, model routing.
+2. Done - Tool-calling orchestration loop (`assistant -> tool -> assistant`) for grounded actions.
+3. Done - Task tool registry + execution handlers (model selects tools).
+4. In progress - Add conversation memory retrieval pipeline (recent + semantic).
+5. In progress - Add structured logs + correlation IDs + App Insights hooks.
+6. In progress - Add unit/integration tests for DM auth, config validation, model routing and tool routing.
 
 ## Phase 2 - Task Management (Cosmos-native)
 
 1. Done - Design and apply `tasks` container schema.
 2. Done - Implement task CRUD service with due dates, priority, tags.
-3. In progress - Add overdue task detector and morning summary formatter.
-4. Pending - Build Discord embed rendering for tasks.
-5. In progress - Add regression tests for task operations.
+3. Done - Route task intents through real model tool calls (no fabricated task data).
+4. In progress - Add overdue task detector and morning summary formatter.
+5. Pending - Build Discord embed rendering for tasks.
+6. In progress - Add regression tests for task operations.
 
 ## Phase 3 - News Digest
 
@@ -62,8 +64,8 @@ This backlog is ordered for shipping a reliable v1 on Azure.
 
 ## Phase 7 - IaC, Security, Ops
 
-1. Bicep/Terraform for all required Azure resources.
-2. GitHub Actions CI/CD to Container Apps.
-3. Key Vault integration for all secrets.
-4. Monitor dashboards, alerts, and cost budget watcher.
-5. DR/backup policy and runbooks.
+1. In progress - Bicep baseline for always-on Container Apps runtime + ACR + monitoring.
+2. In progress - GitHub Actions CI/CD to Container Apps on `main` push.
+3. Pending - Key Vault integration for all secrets.
+4. Pending - Monitor dashboards, alerts, and cost budget watcher.
+5. Pending - DR/backup policy and runbooks.

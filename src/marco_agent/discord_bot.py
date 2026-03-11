@@ -1,21 +1,23 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
-import shlex
 from dataclasses import dataclass
-from typing import Iterable
+from typing import Any, Iterable
 
 import discord
 from discord.ext import commands
 
-from marco_agent.ai.foundry import FoundryChatClient
+from marco_agent.ai.foundry import FoundryChatClient, ToolCallRequest
 from marco_agent.config import AppFileConfig
 from marco_agent.storage.cosmos_memory import CosmosMemoryStore
 from marco_agent.storage.cosmos_tasks import CosmosTaskStore
+from marco_agent.tools.task_tools import TASK_TOOL_NAMES, execute_task_tool_call, task_tool_definitions
 
 LOGGER = logging.getLogger(__name__)
 STRICT_UNAUTHORIZED_MESSAGE = "I only serve meghaboi."
+MAX_TOOL_CALL_ROUNDS = 4
 
 
 @dataclass(slots=True)
@@ -91,18 +93,6 @@ class MarcoDiscordBot(commands.Bot):
         if lowered.startswith("model use"):
             await self._handle_model_use(message, content)
             return
-        if lowered.startswith("add task "):
-            await self._handle_add_task(message, content)
-            return
-        if lowered == "show tasks":
-            await self._handle_show_tasks(message)
-            return
-        if lowered.startswith("complete task "):
-            await self._handle_complete_task(message, content)
-            return
-        if lowered.startswith("delete task "):
-            await self._handle_delete_task(message, content)
-            return
 
         await self._respond_as_marco(message)
 
@@ -153,150 +143,121 @@ class MarcoDiscordBot(commands.Bot):
 
     async def _respond_as_marco(self, message: discord.Message) -> None:
         user_id = str(message.author.id)
+        user_text = message.content.strip()
         recent = await asyncio.to_thread(
             self.memory_store.load_recent_messages,
             user_id=user_id,
             limit=self.file_config.assistant.max_memory_messages,
         )
-        memory_block = self._render_memory_block(recent)
-        system_prompt = (
-            f"{self.file_config.persona.seed_prompt}\n\n"
-            f"Current context about {self.file_config.security.principal_name}:\n{memory_block}"
-        )
+
+        system_prompt = self._build_system_prompt()
+        messages = self._build_messages_for_model(system_prompt=system_prompt, recent=recent, user_text=user_text)
 
         await asyncio.to_thread(
             self.memory_store.save_message,
             user_id=user_id,
             role="user",
-            content=message.content,
+            content=user_text,
         )
 
-        deployment = self.file_config.profile_map()[self.model_state.chat].azure_deployment
-        response = await self.ai_client.chat(
+        # Tool orchestration runs on the reasoning profile, which should be tool-call capable.
+        deployment = self.file_config.profile_map()[self.model_state.reasoning].azure_deployment
+        response_text = await self._run_tool_loop(
+            user_id=user_id,
             deployment=deployment,
-            system_prompt=system_prompt,
-            user_prompt=message.content,
-            temperature=self.file_config.assistant.default_temperature,
+            messages=messages,
         )
 
         await asyncio.to_thread(
             self.memory_store.save_message,
             user_id=user_id,
             role="assistant",
-            content=response,
+            content=response_text,
         )
 
-        for chunk in _chunk_message(response):
+        for chunk in _chunk_message(response_text):
             await message.channel.send(chunk)
 
-    async def _handle_add_task(self, message: discord.Message, raw: str) -> None:
-        if not self.task_store.enabled:
-            await message.channel.send("Task store is not configured yet. Set Cosmos credentials first.")
-            return
-        parsed = _parse_add_task_command(raw)
-        if parsed is None:
-            await message.channel.send(
-                "Usage: `add task <title> [--priority P0|P1|P2|P3] [--due YYYY-MM-DD] [--tags t1,t2]`"
-            )
-            return
-
-        title, priority, due_at, tags = parsed
-        user_id = str(message.author.id)
-        item = await asyncio.to_thread(
-            self.task_store.add_task,
-            user_id=user_id,
-            title=title,
-            priority=priority,
-            due_at=due_at,
-            tags=tags,
+    def _build_system_prompt(self) -> str:
+        return (
+            f"{self.file_config.persona.seed_prompt}\n\n"
+            "Tool-use policy:\n"
+            "- For any task-related action (add/list/show/update/complete/delete/reprioritize), you MUST call task tools.\n"
+            "- Never fabricate task lists, task IDs, statuses, or due dates.\n"
+            "- If task tool output says unavailable/error, tell the user plainly and do not invent success.\n"
+            "- After tool calls, provide a concise grounded response based only on tool outputs."
         )
-        await message.channel.send(
-            f"Task added: `{item['id']}` | `{item['priority']}` | {item['title']}"
-            + (f" | due `{item['due_at']}`" if item.get("due_at") else "")
-        )
-
-    async def _handle_show_tasks(self, message: discord.Message) -> None:
-        user_id = str(message.author.id)
-        tasks = await asyncio.to_thread(self.task_store.list_tasks, user_id=user_id, include_closed=False)
-        if not tasks:
-            await message.channel.send("No open tasks.")
-            return
-        lines = ["Open tasks:"]
-        for item in tasks[:25]:
-            due = item.get("due_at") or "no due date"
-            lines.append(f"- `{item['id']}` [{item['priority']}] {item['title']} (due: {due})")
-        await message.channel.send("\n".join(lines))
-
-    async def _handle_complete_task(self, message: discord.Message, raw: str) -> None:
-        user_id = str(message.author.id)
-        task_id = raw.replace("complete task", "", 1).strip()
-        if not task_id:
-            await message.channel.send("Usage: `complete task <task_id>`")
-            return
-        ok = await asyncio.to_thread(self.task_store.complete_task, user_id=user_id, task_id=task_id)
-        if ok:
-            await message.channel.send(f"Completed task `{task_id}`.")
-        else:
-            await message.channel.send(f"Task `{task_id}` not found.")
-
-    async def _handle_delete_task(self, message: discord.Message, raw: str) -> None:
-        user_id = str(message.author.id)
-        task_id = raw.replace("delete task", "", 1).strip()
-        if not task_id:
-            await message.channel.send("Usage: `delete task <task_id>`")
-            return
-        ok = await asyncio.to_thread(self.task_store.delete_task, user_id=user_id, task_id=task_id)
-        if ok:
-            await message.channel.send(f"Deleted task `{task_id}`.")
-        else:
-            await message.channel.send(f"Task `{task_id}` not found.")
 
     @staticmethod
-    def _render_memory_block(entries: list[dict]) -> str:
-        if not entries:
-            return "No prior conversation memory."
-        lines = []
-        for item in entries:
-            role = item.get("role", "unknown")
-            content = item.get("content", "").strip()
-            if not content:
-                continue
-            lines.append(f"{role}: {content}")
-        return "\n".join(lines) if lines else "No prior conversation memory."
+    def _build_messages_for_model(
+        *,
+        system_prompt: str,
+        recent: list[dict[str, Any]],
+        user_text: str,
+    ) -> list[dict[str, Any]]:
+        messages: list[dict[str, Any]] = [{"role": "system", "content": system_prompt}]
+        for item in recent:
+            role = str(item.get("role", "")).strip().lower()
+            content = str(item.get("content", "")).strip()
+            if role in {"user", "assistant"} and content:
+                messages.append({"role": role, "content": content})
+        messages.append({"role": "user", "content": user_text})
+        return messages
+
+    async def _run_tool_loop(
+        self,
+        *,
+        user_id: str,
+        deployment: str,
+        messages: list[dict[str, Any]],
+    ) -> str:
+        tools = task_tool_definitions()
+        work_messages = list(messages)
+
+        for _ in range(MAX_TOOL_CALL_ROUNDS):
+            result = await self.ai_client.complete_messages(
+                deployment=deployment,
+                messages=work_messages,
+                temperature=self.file_config.assistant.default_temperature,
+                tools=tools,
+                tool_choice="auto",
+            )
+            if not result.tool_calls:
+                if _looks_like_textual_tool_stub(result.content):
+                    return (
+                        "Tool execution is blocked: active orchestration model returned textual tool markers "
+                        "instead of structured tool calls. Set `active_models.reasoning` to a tool-capable "
+                        "deployment (for example `Kimi-K2.5`)."
+                    )
+                if result.content:
+                    return result.content
+                return "No content generated. Try rephrasing your request."
+
+            work_messages.append(result.assistant_message)
+            for call in result.tool_calls:
+                tool_output = await self._execute_tool_call(user_id=user_id, call=call)
+                work_messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": call.id,
+                        "content": json.dumps(tool_output, ensure_ascii=True),
+                    }
+                )
+
+        return "I hit an internal tool-call loop limit. Please retry your request."
+
+    async def _execute_tool_call(self, *, user_id: str, call: ToolCallRequest) -> dict[str, Any]:
+        LOGGER.info("Tool call requested: %s(%s)", call.name, call.arguments_json)
+        if call.name in TASK_TOOL_NAMES:
+            return await execute_task_tool_call(
+                task_store=self.task_store,
+                user_id=user_id,
+                tool_name=call.name,
+                arguments_json=call.arguments_json,
+            )
+        return {"ok": False, "error": f"Unknown tool '{call.name}'."}
 
 
-def _parse_add_task_command(raw: str) -> tuple[str, str, str | None, list[str]] | None:
-    try:
-        parts = shlex.split(raw)
-    except ValueError:
-        return None
-
-    if len(parts) < 3 or parts[0].lower() != "add" or parts[1].lower() != "task":
-        return None
-
-    title_tokens: list[str] = []
-    priority = "P2"
-    due_at: str | None = None
-    tags: list[str] = []
-    idx = 2
-    while idx < len(parts):
-        token = parts[idx]
-        if token == "--priority" and idx + 1 < len(parts):
-            priority = parts[idx + 1].upper()
-            idx += 2
-            continue
-        if token == "--due" and idx + 1 < len(parts):
-            due_at = parts[idx + 1]
-            idx += 2
-            continue
-        if token == "--tags" and idx + 1 < len(parts):
-            tags = [tag.strip() for tag in parts[idx + 1].split(",") if tag.strip()]
-            idx += 2
-            continue
-        title_tokens.append(token)
-        idx += 1
-
-    title = " ".join(title_tokens).strip()
-    if not title:
-        return None
-    return (title, priority, due_at, tags)
+def _looks_like_textual_tool_stub(content: str) -> bool:
+    text = (content or "").lower()
+    return "tool_call_name" in text and "tool_call_arguments" in text

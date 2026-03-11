@@ -1,7 +1,7 @@
 security:
   principal_name: "meghaboi"
   principal_discord_username: "saitamawastaken"
-  authorized_discord_user_id: "REPLACE_WITH_DISCORD_USER_ID"
+  authorized_discord_user_id: "772134199799971840"
   unauthorized_message: "I only serve meghaboi."
 
 assistant:
@@ -17,19 +17,19 @@ execution:
     session_ttl_minutes: 120
 
 model_profiles:
-  - id: "gpt4o-fast"
+  - id: "deepseek-3.2"
     description: "Balanced speed and quality for day-to-day chat."
-    azure_deployment: "gpt-4o"
-  - id: "o3-deep"
+    azure_deployment: "DeepSeek-V3.2"
+  - id: "kimi-k2.5"
     description: "Reasoning-heavy mode for planning and coding decisions."
-    azure_deployment: "o3"
+    azure_deployment: "Kimi-K2.5"
   - id: "embed-large"
     description: "Embedding profile for search and memory indexing."
-    azure_deployment: "text-embedding-3-large"
+    azure_deployment: "embed-v-4-0"
 
 active_models:
-  chat: "gpt4o-fast"
-  reasoning: "o3-deep"
+  chat: "deepseek-3.2"
+  reasoning: "kimi-k2.5"
   embeddings: "embed-large"
 
 persona:

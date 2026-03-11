@@ -45,6 +45,19 @@ Azure AI Foundry Chat Client             Cosmos DB (security log)
 Health endpoint (/healthz) via aiohttp for Container Apps probes
 ```
 
+## Tool-First Orchestration (Mandatory)
+
+Marco now follows a strict tool-calling loop for operational actions:
+
+1. User message enters the assistant.
+2. Model decides whether to call tools.
+3. Marco executes tool calls against real systems (Cosmos, later GitHub/Blob/Search/etc.).
+4. Tool outputs are returned to the model.
+5. Model produces the grounded final response.
+
+For task operations, Marco must use tools and must not fabricate task data.
+This is the required architecture for future features as well (news, RAG, GitHub, publishing, analytics).
+
 ## Repository Layout
 
 ```text
@@ -110,6 +123,7 @@ tests/
   - Logical profile IDs mapped to Azure deployment names.
 - `active_models`
   - Per-capability profile selection (`chat`, `reasoning`, `embeddings`).
+  - Tool orchestration currently runs on `reasoning`; choose a model with native structured tool-calling support.
 - `execution.codex`
   - Reserved for upcoming Codex-backed execution sessions.
 
@@ -135,10 +149,13 @@ tests/
 
 ### Task management
 
-- `add task <title> [--priority P0|P1|P2|P3] [--due YYYY-MM-DD] [--tags a,b]`
-- `show tasks`
-- `complete task <task_id>`
-- `delete task <task_id>`
+- Natural language is supported and routed through model tool-calls.
+- Example prompts:
+  - `add task Ship v1 with p1 priority`
+  - `show tasks`
+  - `complete task abc12345`
+  - `delete task abc12345`
+  - `what are my open tasks right now?`
 
 ### Natural conversation
 
@@ -150,6 +167,11 @@ Any other DM is handled by Azure AI Foundry with persona + recent memory context
 - Unauthorized users always get a fixed response with no extra metadata.
 - Secrets are expected via environment variables (Key Vault wiring is planned next).
 - No secrets are committed to source control.
+
+## Reliability Rule
+
+Operational responses that require state changes or retrieval must come from tool outputs.
+If a tool is unavailable, Marco must explicitly report that instead of hallucinating success.
 
 ## Health and Operations
 
@@ -172,6 +194,33 @@ python -m compileall src
 The full phased implementation plan (Discord slash commands, RAG, news digest, GitHub automation, voice, video, blog, IaC, ops) is tracked in:
 
 - `docs/microtasks.md`
+
+## Azure Cosmos First-Run
+
+Use the provisioning script:
+
+```powershell
+pwsh ./scripts/azure/provision-cosmos.ps1
+```
+
+Detailed guide:
+
+- `docs/cosmos-setup.md`
+
+## Azure 24/7 Deployment
+
+Marco can run continuously on Azure Container Apps (`minReplicas=1`) with push-to-deploy via GitHub Actions.
+
+Start here:
+
+- `docs/azure-deploy.md`
+
+Key assets:
+
+- IaC: `infra/main.bicep`
+- Provision script: `scripts/azure/provision-container-app.ps1`
+- Deploy script: `scripts/azure/deploy-container-app.ps1`
+- CI/CD workflow: `.github/workflows/deploy-containerapp.yml`
 
 ## Next Milestones
 
