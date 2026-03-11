@@ -6,7 +6,7 @@ security:
 
 assistant:
   name: "Marco"
-  allow_runtime_model_switch: true
+  allow_runtime_model_switch: false
   max_memory_messages: 20
   default_temperature: 0.25
 
@@ -28,7 +28,7 @@ model_profiles:
     azure_deployment: "embed-v-4-0"
 
 active_models:
-  chat: "deepseek-3.2"
+  chat: "kimi-k2.5"
   reasoning: "kimi-k2.5"
   embeddings: "embed-large"
 

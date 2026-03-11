@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 import logging
 from typing import Any
 
@@ -108,29 +109,7 @@ class FoundryChatClient:
 
         message = response.choices[0].message
         content = _extract_content(message.content)
-        tool_calls: list[ToolCallRequest] = []
-        tool_call_payloads: list[dict[str, Any]] = []
-        for call in getattr(message, "tool_calls", []) or []:
-            fn = getattr(call, "function", None)
-            if getattr(call, "type", None) != "function" or fn is None:
-                continue
-            name = getattr(fn, "name", "") or ""
-            args = getattr(fn, "arguments", "") or "{}"
-            call_id = getattr(call, "id", "") or ""
-            tool_calls.append(
-                ToolCallRequest(
-                    id=call_id,
-                    name=name,
-                    arguments_json=args,
-                )
-            )
-            tool_call_payloads.append(
-                {
-                    "id": call_id,
-                    "type": "function",
-                    "function": {"name": name, "arguments": args},
-                }
-            )
+        tool_calls, tool_call_payloads = _extract_tool_calls(message)
 
         assistant_message: dict[str, Any] = {"role": "assistant"}
         if content:
@@ -151,10 +130,119 @@ def _extract_content(content: Any) -> str:
     if isinstance(content, list):
         parts: list[str] = []
         for item in content:
-            text = getattr(item, "text", None)
+            text = _extract_content_item_text(item)
             if text:
                 parts.append(text)
         return "\n".join(parts).strip()
     if content is None:
         return ""
     return str(content).strip()
+
+
+def _extract_content_item_text(item: Any) -> str:
+    if isinstance(item, str):
+        return item.strip()
+    if isinstance(item, dict):
+        for key in ("text", "content", "value"):
+            value = item.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        return ""
+    for key in ("text", "content", "value"):
+        value = getattr(item, key, None)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def _extract_tool_calls(message: Any) -> tuple[list[ToolCallRequest], list[dict[str, Any]]]:
+    parsed: list[ToolCallRequest] = []
+    payloads: list[dict[str, Any]] = []
+
+    raw_calls = _read_value(message, "tool_calls")
+    if isinstance(raw_calls, list):
+        for idx, raw_call in enumerate(raw_calls):
+            tool_request = _parse_tool_call(raw_call, idx=idx)
+            if tool_request is None:
+                continue
+            parsed.append(tool_request)
+            payloads.append(
+                {
+                    "id": tool_request.id,
+                    "type": "function",
+                    "function": {
+                        "name": tool_request.name,
+                        "arguments": tool_request.arguments_json,
+                    },
+                }
+            )
+
+    # Legacy field returned by some providers/adapters when a single function is requested.
+    if not parsed:
+        legacy = _read_value(message, "function_call")
+        legacy_call = _parse_legacy_function_call(legacy)
+        if legacy_call is not None:
+            parsed.append(legacy_call)
+            payloads.append(
+                {
+                    "id": legacy_call.id,
+                    "type": "function",
+                    "function": {
+                        "name": legacy_call.name,
+                        "arguments": legacy_call.arguments_json,
+                    },
+                }
+            )
+
+    return parsed, payloads
+
+
+def _parse_tool_call(raw_call: Any, *, idx: int) -> ToolCallRequest | None:
+    fn = _read_value(raw_call, "function")
+    if fn is None:
+        return None
+
+    name = _read_value(fn, "name") or ""
+    if not name:
+        return None
+
+    args = _normalize_tool_args(_read_value(fn, "arguments"))
+    call_id = _read_value(raw_call, "id") or f"tool_call_{idx}"
+
+    return ToolCallRequest(
+        id=str(call_id),
+        name=str(name),
+        arguments_json=args,
+    )
+
+
+def _parse_legacy_function_call(raw_call: Any) -> ToolCallRequest | None:
+    if raw_call is None:
+        return None
+    name = _read_value(raw_call, "name") or ""
+    if not name:
+        return None
+    args = _normalize_tool_args(_read_value(raw_call, "arguments"))
+    return ToolCallRequest(
+        id="legacy_function_call_0",
+        name=str(name),
+        arguments_json=args,
+    )
+
+
+def _normalize_tool_args(value: Any) -> str:
+    if isinstance(value, str):
+        text = value.strip()
+        return text if text else "{}"
+    if value is None:
+        return "{}"
+    try:
+        return json.dumps(value, ensure_ascii=True)
+    except TypeError:
+        return str(value).strip() or "{}"
+
+
+def _read_value(obj: Any, key: str) -> Any:
+    if isinstance(obj, dict):
+        return obj.get(key)
+    return getattr(obj, key, None)

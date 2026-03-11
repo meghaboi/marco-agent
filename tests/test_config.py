@@ -9,6 +9,9 @@ def test_load_file_config_smoke() -> None:
     cfg = load_file_config(Path("config/marco.config.yaml"))
     assert cfg.security.unauthorized_message == "I only serve meghaboi."
     assert cfg.get_deployment_for_capability("chat")
+    assert cfg.active_models.chat == "kimi-k2.5"
+    assert cfg.active_models.reasoning == "kimi-k2.5"
+    assert cfg.assistant.allow_runtime_model_switch is False
 
 
 def test_missing_profile_raises(tmp_path: Path) -> None:

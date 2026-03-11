@@ -9,8 +9,8 @@ This repo now includes a working foundation with strict access control, Azure AI
 - Enforces principal-only DM access by Discord user ID.
 - Replies to any unauthorized user with exactly:
   - `I only serve meghaboi.`
-- Routes chat through Azure AI Foundry deployments you select in config.
-- Supports runtime model switching from Discord DM (if enabled).
+- Routes chat and tool orchestration through Azure AI Foundry (`kimi-k2.5` by default).
+- Runtime model switching is disabled by default for stable routing.
 - Stores conversation memory in Cosmos DB (optional).
 - Stores and manages tasks in Cosmos DB (optional).
 - Exposes `/healthz` endpoint for Azure Container Apps liveness/readiness probes.
@@ -117,13 +117,14 @@ tests/
   - `authorized_discord_user_id`: the only user allowed to use Marco.
   - `unauthorized_message`: keep as `I only serve meghaboi.` to preserve strict policy.
 - `assistant`
-  - `allow_runtime_model_switch`: enables `model use ...` commands.
+  - `allow_runtime_model_switch`: defaults to `false`; set `true` to enable `model use ...` commands.
   - `max_memory_messages`: number of recent messages loaded into context.
 - `model_profiles`
   - Logical profile IDs mapped to Azure deployment names.
 - `active_models`
   - Per-capability profile selection (`chat`, `reasoning`, `embeddings`).
-  - Tool orchestration currently runs on `reasoning`; choose a model with native structured tool-calling support.
+  - Default config pins both `chat` and `reasoning` to `kimi-k2.5`.
+  - Tool orchestration runs on `reasoning`; choose a model with native structured tool-calling support if you override.
 - `execution.codex`
   - Reserved for upcoming Codex-backed execution sessions.
 
@@ -145,7 +146,7 @@ tests/
 ### Model control
 
 - `model list`
-- `model use <chat|reasoning|embeddings> <profile_id>`
+- `model use <chat|reasoning|embeddings> <profile_id>` (only when `allow_runtime_model_switch: true`)
 
 ### Task management
 
@@ -172,6 +173,7 @@ Any other DM is handled by Azure AI Foundry with persona + recent memory context
 
 Operational responses that require state changes or retrieval must come from tool outputs.
 If a tool is unavailable, Marco must explicitly report that instead of hallucinating success.
+The Foundry client also normalizes multiple tool-call/content response formats to reduce empty-response failures.
 
 ## Health and Operations
 
