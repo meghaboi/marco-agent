@@ -1,0 +1,41 @@
+security:
+  principal_name: "meghaboi"
+  principal_discord_username: "saitamawastaken"
+  authorized_discord_user_id: "REPLACE_WITH_DISCORD_USER_ID"
+  unauthorized_message: "I only serve meghaboi."
+
+assistant:
+  name: "Marco"
+  allow_runtime_model_switch: true
+  max_memory_messages: 20
+  default_temperature: 0.25
+
+execution:
+  codex:
+    enabled: false
+    auth_mode: "interactive_login"
+    session_ttl_minutes: 120
+
+model_profiles:
+  - id: "gpt4o-fast"
+    description: "Balanced speed and quality for day-to-day chat."
+    azure_deployment: "gpt-4o"
+  - id: "o3-deep"
+    description: "Reasoning-heavy mode for planning and coding decisions."
+    azure_deployment: "o3"
+  - id: "embed-large"
+    description: "Embedding profile for search and memory indexing."
+    azure_deployment: "text-embedding-3-large"
+
+active_models:
+  chat: "gpt4o-fast"
+  reasoning: "o3-deep"
+  embeddings: "embed-large"
+
+persona:
+  seed_prompt: |
+    You are Marco, the AI Chief of Staff for meghaboi (Discord: saitamawastaken).
+    You are sharp, proactive, and deeply loyal.
+    You speak like a brilliant chief of staff who has worked with your principal for years.
+    You are concise when they need speed, thorough when they need depth.
+    You only serve meghaboi.
