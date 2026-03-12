@@ -15,6 +15,7 @@ from marco_agent.config import AppFileConfig
 from marco_agent.observability import correlation_scope, new_correlation_id
 from marco_agent.services.memory_retrieval import MemoryRetrievalService
 from marco_agent.services.news_digest import NewsDigestService
+from marco_agent.services.file_rag import FileRagService, parse_project_and_tags
 from marco_agent.storage.cosmos_digest import CosmosDigestStore
 from marco_agent.storage.cosmos_memory import CosmosMemoryStore
 from marco_agent.storage.cosmos_tasks import CosmosTaskStore
@@ -67,6 +68,7 @@ class MarcoDiscordBot(commands.Bot):
         digest_store: CosmosDigestStore,
         memory_retrieval: MemoryRetrievalService,
         news_digest_service: NewsDigestService,
+        file_rag_service: FileRagService,
     ) -> None:
         intents = discord.Intents.default()
         intents.message_content = True
@@ -78,6 +80,7 @@ class MarcoDiscordBot(commands.Bot):
         self.digest_store = digest_store
         self.memory_retrieval = memory_retrieval
         self.news_digest_service = news_digest_service
+        self.file_rag_service = file_rag_service
         self.model_state = RuntimeModelState(
             chat=file_config.active_models.chat,
             reasoning=file_config.active_models.reasoning,
@@ -117,6 +120,18 @@ class MarcoDiscordBot(commands.Bot):
             return
 
         lowered = content.lower()
+        if lowered.startswith("summarize "):
+            await self._handle_summarize_command(message, content)
+            return
+        if lowered.startswith("compare "):
+            await self._handle_compare_command(message, content)
+            return
+
+        if message.attachments:
+            await self._handle_attachments(message, content)
+            if not content:
+                return
+
         if lowered == "model list":
             await self._handle_model_list(message)
             return
@@ -126,6 +141,72 @@ class MarcoDiscordBot(commands.Bot):
 
         async with message.channel.typing():
             await self._respond_as_marco(message)
+
+    async def _handle_attachments(self, message: discord.Message, content: str) -> None:
+        if not self.file_rag_service.enabled:
+            await message.channel.send("File ingestion is unavailable. Configure Blob Storage + Azure AI Search.")
+            return
+        project_id, tags = parse_project_and_tags(content)
+        uploaded = 0
+        for attachment in message.attachments:
+            filename = (attachment.filename or "").strip()
+            if not _is_supported_text_file(filename=filename, content_type=attachment.content_type):
+                continue
+            payload = await attachment.read()
+            result = await self.file_rag_service.ingest_text_file(
+                user_id=str(message.author.id),
+                project_id=project_id,
+                filename=filename,
+                content_type=attachment.content_type,
+                payload=payload,
+                tags=tags,
+            )
+            if result.get("ok"):
+                uploaded += 1
+        if uploaded:
+            await message.channel.send(
+                f"Indexed {uploaded} attachment(s) into project `{project_id}` for retrieval.")
+
+    async def _handle_summarize_command(self, message: discord.Message, raw: str) -> None:
+        parts = raw.split(maxsplit=2)
+        if len(parts) < 2:
+            await message.channel.send("Usage: summarize <project_id> [focus]")
+            return
+        project_id = parts[1].strip()
+        focus = parts[2].strip() if len(parts) > 2 else ""
+        result = await self.file_rag_service.summarize(
+            user_id=str(message.author.id),
+            project_id=project_id,
+            focus=focus,
+        )
+        if not result.get("ok"):
+            await message.channel.send(str(result.get("error", "Summary failed.")))
+            return
+        text = str(result.get("summary", "")).strip()
+        cites = _format_citations(result.get("citations"))
+        for chunk in _chunk_message(f"{text}\n\n{cites}".strip()):
+            await message.channel.send(chunk)
+
+    async def _handle_compare_command(self, message: discord.Message, raw: str) -> None:
+        payload = raw.removeprefix("compare ").strip()
+        segments = [part.strip() for part in payload.split("|")]
+        if len(segments) != 3:
+            await message.channel.send("Usage: compare <project_id> | <topic_a> | <topic_b>")
+            return
+        project_id, left, right = segments
+        result = await self.file_rag_service.compare(
+            user_id=str(message.author.id),
+            project_id=project_id,
+            left_topic=left,
+            right_topic=right,
+        )
+        if not result.get("ok"):
+            await message.channel.send(str(result.get("error", "Compare failed.")))
+            return
+        text = str(result.get("comparison", "")).strip()
+        cites = _format_citations(result.get("citations"))
+        for chunk in _chunk_message(f"{text}\n\n{cites}".strip()):
+            await message.channel.send(chunk)
 
     async def _handle_model_list(self, message: discord.Message) -> None:
         profile_map = self.file_config.profile_map()
@@ -409,6 +490,30 @@ class MarcoDiscordBot(commands.Bot):
                 embeds.append(embed)
 
         return embeds[-3:]
+
+
+def _is_supported_text_file(*, filename: str, content_type: str | None) -> bool:
+    lower = filename.lower()
+    if lower.endswith((".txt", ".md", ".markdown", ".rst", ".json", ".csv", ".py", ".yaml", ".yml")):
+        return True
+    return bool(content_type and content_type.startswith("text/"))
+
+
+def _format_citations(citations: Any) -> str:
+    if not isinstance(citations, list) or not citations:
+        return ""
+    lines = ["Sources:"]
+    for idx, item in enumerate(citations[:6], start=1):
+        if not isinstance(item, dict):
+            continue
+        filename = str(item.get("filename", "unknown"))
+        chunk_index = item.get("chunk_index", 0)
+        blob_url = str(item.get("blob_url", ""))
+        if blob_url:
+            lines.append(f"[{idx}] {filename}#chunk-{chunk_index}: {blob_url}")
+        else:
+            lines.append(f"[{idx}] {filename}#chunk-{chunk_index}")
+    return "\n".join(lines)
 
 
 def _looks_like_textual_tool_stub(content: str) -> bool:

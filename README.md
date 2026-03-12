@@ -13,6 +13,8 @@ This repo now includes a working foundation with strict access control, Azure AI
 - Runtime model switching is disabled by default for stable routing.
 - Stores conversation memory in Cosmos DB (optional).
 - Adds semantic memory retrieval (recent + vector similarity) for richer context windows.
+- Ingests Discord text attachments into Blob Storage and indexes chunk embeddings in Azure AI Search.
+- Supports project-scoped retrieval with source citations plus summarize/compare commands.
 - Stores and manages tasks in Cosmos DB (optional).
 - Supports grounded news digests with citations, preferences, and dig-deeper re-briefs.
 - Tracks digest deliveries and opens in Cosmos DB.
@@ -77,6 +79,11 @@ src/marco_agent/
   storage/
     cosmos_memory.py         # Conversation + unauthorized logs
     cosmos_tasks.py          # Task CRUD backend
+    blob_files.py            # Blob upload store for file attachments
+    search_index.py          # Azure AI Search chunk index store
+    cosmos_files.py          # File -> project mapping metadata in Cosmos
+  services/
+    file_rag.py              # Chunking, embedding index, retrieval/summary/compare
 tests/
   test_config.py
   test_task_parser.py
@@ -144,6 +151,14 @@ tests/
 - `COSMOS_DB_CONTAINER` (default `conversation_memory`)
 - `COSMOS_TASKS_CONTAINER` (default `tasks`)
 - `COSMOS_DIGEST_CONTAINER` (default `news_digest`)
+- `COSMOS_FILES_CONTAINER` (default `project_files`)
+- `BLOB_CONNECTION_STRING` (preferred for local/dev; can omit when using managed identity)
+- `BLOB_ACCOUNT_URL` (optional alternative to connection string, e.g. `https://<account>.blob.core.windows.net`)
+- `BLOB_CONTAINER` (default `project-files`)
+- `AZURE_SEARCH_ENDPOINT` (required for file retrieval, e.g. `https://<service>.search.windows.net`)
+- `AZURE_SEARCH_KEY` (optional if app has managed identity with Search Data Contributor role)
+- `AZURE_SEARCH_INDEX` (default `marco-file-chunks`)
+- `EMBEDDING_DIMENSIONS` (default `3072`, must match your embedding model)
 - `APPLICATIONINSIGHTS_CONNECTION_STRING` (optional, for Azure Monitor/App Insights)
 - `NEWS_RSS_URL_TEMPLATE` (default Google News RSS search template)
 - `DIGEST_TIMER_SCHEDULE` (default `0 30 2 * * *` UTC)
@@ -167,9 +182,35 @@ tests/
   - `delete task abc12345`
   - `what are my open tasks right now?`
 
+### File RAG commands
+
+- Upload one or more text attachments in DM with optional metadata in message body:
+  - `project:<project_id> tags:tag1,tag2`
+- `summarize <project_id> [focus]`
+- `compare <project_id> | <topic_a> | <topic_b>`
+
+Responses include source citations pointing to indexed file chunks.
+
 ### Natural conversation
 
 Any other DM is handled by Azure AI Foundry with persona + recent memory context.
+
+
+## Phase 4 Setup Notes (RAG Files)
+
+To enable attachment ingestion + retrieval, set env vars in `.env` (or Azure Container App settings):
+
+1. Blob Storage
+   - Prefer `BLOB_CONNECTION_STRING` for fast setup.
+   - Get it from Azure Portal -> Storage Account -> Access keys -> Connection string.
+   - Or use `BLOB_ACCOUNT_URL` + managed identity instead of keys.
+2. Azure AI Search
+   - Set `AZURE_SEARCH_ENDPOINT`.
+   - Use `AZURE_SEARCH_KEY` from Azure AI Search -> Keys, **or** leave empty and grant managed identity access.
+3. Cosmos mapping container
+   - `COSMOS_FILES_CONTAINER` defaults to `project_files` and is auto-created like other containers.
+
+If these are not set, Marco still runs, but file ingestion/retrieval commands report unavailable.
 
 ## Security Model
 
@@ -245,7 +286,7 @@ Key assets:
 
 - Key Vault-backed secret loading.
 - Slash commands and richer Discord embeds.
-- RAG pipeline (Blob + embeddings + AI Search).
+- RAG pipeline (Blob + embeddings + AI Search). ✅ Phase 4 baseline implemented for file attachments.
 - IaC (Bicep/Terraform) + GitHub Actions CI/CD to Azure Container Apps.
 
 ## License

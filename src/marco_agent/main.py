@@ -16,9 +16,13 @@ from marco_agent.logging_config import configure_logging
 from marco_agent.observability import correlation_scope
 from marco_agent.services.memory_retrieval import MemoryRetrievalService
 from marco_agent.services.news_digest import NewsDigestService
+from marco_agent.services.file_rag import FileRagService
+from marco_agent.storage.blob_files import BlobFileStore
 from marco_agent.storage.cosmos_digest import CosmosDigestStore
+from marco_agent.storage.cosmos_files import CosmosFileMapStore
 from marco_agent.storage.cosmos_memory import CosmosMemoryStore
 from marco_agent.storage.cosmos_tasks import CosmosTaskStore
+from marco_agent.storage.search_index import AzureSearchChunkStore
 
 LOGGER = logging.getLogger(__name__)
 
@@ -75,6 +79,31 @@ async def run() -> None:
         ai_client=ai_client,
         file_config=file_config,
     )
+    blob_store = BlobFileStore(
+        account_url=env_config.blob_account_url,
+        connection_string=env_config.blob_connection_string,
+        container_name=env_config.blob_container,
+    )
+    search_store = AzureSearchChunkStore(
+        endpoint=env_config.azure_search_endpoint,
+        api_key=env_config.azure_search_key,
+        index_name=env_config.azure_search_index,
+        embedding_dimensions=env_config.embedding_dimensions,
+    )
+    file_map_store = CosmosFileMapStore(
+        endpoint=env_config.cosmos_db_endpoint,
+        key=env_config.cosmos_db_key,
+        database_name=env_config.cosmos_db_database,
+        container_name=env_config.cosmos_files_container,
+    )
+    file_rag_service = FileRagService(
+        ai_client=ai_client,
+        blob_store=blob_store,
+        search_store=search_store,
+        file_map_store=file_map_store,
+        embedding_deployment_resolver=lambda: file_config.profile_map()[file_config.active_models.embeddings].azure_deployment,
+        chat_deployment_resolver=lambda: file_config.profile_map()[file_config.active_models.chat].azure_deployment,
+    )
     news_digest_service = NewsDigestService(
         ai_client=ai_client,
         digest_store=digest_store,
@@ -88,6 +117,7 @@ async def run() -> None:
         digest_store=digest_store,
         memory_retrieval=memory_retrieval,
         news_digest_service=news_digest_service,
+        file_rag_service=file_rag_service,
     )
 
     health_runner = await start_health_server(env_config.port)

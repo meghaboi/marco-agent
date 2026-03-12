@@ -99,6 +99,14 @@ class EnvConfig(BaseModel):
     cosmos_db_container: str = Field(default="conversation_memory", alias="COSMOS_DB_CONTAINER")
     cosmos_tasks_container: str = Field(default="tasks", alias="COSMOS_TASKS_CONTAINER")
     cosmos_digest_container: str = Field(default="news_digest", alias="COSMOS_DIGEST_CONTAINER")
+    cosmos_files_container: str = Field(default="project_files", alias="COSMOS_FILES_CONTAINER")
+    blob_connection_string: str | None = Field(default=None, alias="BLOB_CONNECTION_STRING")
+    blob_account_url: str | None = Field(default=None, alias="BLOB_ACCOUNT_URL")
+    blob_container: str = Field(default="project-files", alias="BLOB_CONTAINER")
+    azure_search_endpoint: str | None = Field(default=None, alias="AZURE_SEARCH_ENDPOINT")
+    azure_search_key: str | None = Field(default=None, alias="AZURE_SEARCH_KEY")
+    azure_search_index: str = Field(default="marco-file-chunks", alias="AZURE_SEARCH_INDEX")
+    embedding_dimensions: int = Field(default=3072, alias="EMBEDDING_DIMENSIONS")
     appinsights_connection_string: str | None = Field(
         default=None,
         alias="APPLICATIONINSIGHTS_CONNECTION_STRING",

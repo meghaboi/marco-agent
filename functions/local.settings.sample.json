@@ -3,6 +3,13 @@
   "Values": {
     "AzureWebJobsStorage": "UseDevelopmentStorage=true",
     "FUNCTIONS_WORKER_RUNTIME": "python",
-    "DIGEST_TIMER_SCHEDULE": "0 30 2 * * *"
+    "DIGEST_TIMER_SCHEDULE": "0 30 2 * * *",
+    "BLOB_CONNECTION_STRING": "",
+    "BLOB_CONTAINER": "project-files",
+    "AZURE_SEARCH_ENDPOINT": "",
+    "AZURE_SEARCH_KEY": "",
+    "AZURE_SEARCH_INDEX": "marco-file-chunks",
+    "COSMOS_FILES_CONTAINER": "project_files",
+    "EMBEDDING_DIMENSIONS": "3072"
   }
 }

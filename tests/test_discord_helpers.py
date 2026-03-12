@@ -1,10 +1,12 @@
 import discord
 
 from marco_agent.discord_bot import (
+    _format_citations,
     _build_task_action_embed,
     _build_task_add_embed,
     _build_task_list_embed,
     _is_authorized_user,
+    _is_supported_text_file,
     _looks_like_textual_tool_stub,
 )
 
@@ -74,3 +76,20 @@ def test_task_action_embed_failure() -> None:
     assert embed.title == "Task Completion Failed"
     assert "abc12345" in (embed.description or "")
     assert any(field.name == "Error" and "Not found" in field.value for field in embed.fields)
+
+
+def test_supported_text_file_detection() -> None:
+    assert _is_supported_text_file(filename="notes.md", content_type="text/markdown")
+    assert _is_supported_text_file(filename="data.unknown", content_type="text/plain")
+    assert not _is_supported_text_file(filename="image.png", content_type="image/png")
+
+
+def test_format_citations() -> None:
+    text = _format_citations(
+        [
+            {"filename": "plan.md", "chunk_index": 2, "blob_url": "https://example"},
+            {"filename": "notes.txt", "chunk_index": 0},
+        ]
+    )
+    assert "Sources:" in text
+    assert "plan.md#chunk-2" in text

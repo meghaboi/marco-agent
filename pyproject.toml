@@ -11,6 +11,9 @@ requires-python = ">=3.11"
 dependencies = [
   "aiohttp>=3.10.11",
   "azure-cosmos>=4.7.0",
+  "azure-identity>=1.19.0",
+  "azure-search-documents>=11.6.0",
+  "azure-storage-blob>=12.24.0",
   "azure-functions>=1.21.3",
   "discord.py>=2.5.2",
   "feedparser>=6.0.11",
