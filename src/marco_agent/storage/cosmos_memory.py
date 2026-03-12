@@ -42,13 +42,38 @@ class CosmosMemoryStore:
     def save_message(self, *, user_id: str, role: str, content: str) -> None:
         if not self._container:
             return
+        ts = datetime.now(UTC)
         item = {
-            "id": f"{user_id}-{role}-{datetime.now(UTC).timestamp()}",
+            "id": f"{user_id}-{role}-{ts.timestamp()}",
             "partition_key": f"user:{user_id}",
             "kind": "conversation",
             "role": role,
             "content": content,
-            "created_at": datetime.now(UTC).isoformat(),
+            "created_at": ts.isoformat(),
+        }
+        self._container.create_item(item)
+
+    def save_message_embedding(
+        self,
+        *,
+        user_id: str,
+        role: str,
+        content: str,
+        embedding: list[float],
+    ) -> None:
+        if not self._container:
+            return
+        if not content.strip() or not embedding:
+            return
+        ts = datetime.now(UTC)
+        item = {
+            "id": f"{user_id}-memvec-{role}-{ts.timestamp()}",
+            "partition_key": f"user:{user_id}",
+            "kind": "conversation_embedding",
+            "role": role,
+            "content": content,
+            "embedding": embedding,
+            "created_at": ts.isoformat(),
         }
         self._container.create_item(item)
 
@@ -86,6 +111,26 @@ class CosmosMemoryStore:
         )
         items.reverse()
         return items
+
+    def load_embedding_candidates(self, *, user_id: str, limit: int) -> list[dict[str, Any]]:
+        if not self._container:
+            return []
+        query = (
+            "SELECT TOP @limit c.role, c.content, c.embedding, c.created_at "
+            "FROM c WHERE c.partition_key = @pk AND c.kind = 'conversation_embedding' "
+            "ORDER BY c.created_at DESC"
+        )
+        parameters = [
+            {"name": "@limit", "value": limit},
+            {"name": "@pk", "value": f"user:{user_id}"},
+        ]
+        return list(
+            self._container.query_items(
+                query=query,
+                parameters=parameters,
+                enable_cross_partition_query=False,
+            )
+        )
 
     def delete_all_for_user(self, *, user_id: str) -> int:
         if not self._container:

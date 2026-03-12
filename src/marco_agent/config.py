@@ -22,6 +22,8 @@ class AssistantConfig(BaseModel):
     name: str = "Marco"
     allow_runtime_model_switch: bool = True
     max_memory_messages: int = 20
+    max_semantic_memory_messages: int = 8
+    semantic_memory_enabled: bool = True
     default_temperature: float = 0.25
 
 
@@ -33,6 +35,19 @@ class CodexExecutionConfig(BaseModel):
 
 class ExecutionConfig(BaseModel):
     codex: CodexExecutionConfig = Field(default_factory=CodexExecutionConfig)
+
+
+class DigestDefaultsConfig(BaseModel):
+    default_time_local: str = "08:30"
+    default_timezone: str = "UTC"
+    default_categories: list[str] = Field(
+        default_factory=lambda: ["geopolitics", "ai", "ml", "game development", "general"]
+    )
+    max_items: int = 5
+
+
+class RetrievalConfig(BaseModel):
+    semantic_similarity_threshold: float = 0.65
 
 
 class ModelProfile(BaseModel):
@@ -55,6 +70,8 @@ class AppFileConfig(BaseModel):
     security: SecurityConfig
     assistant: AssistantConfig
     execution: ExecutionConfig = Field(default_factory=ExecutionConfig)
+    digest: DigestDefaultsConfig = Field(default_factory=DigestDefaultsConfig)
+    retrieval: RetrievalConfig = Field(default_factory=RetrievalConfig)
     model_profiles: list[ModelProfile]
     active_models: ActiveModels
     persona: PersonaConfig
@@ -71,7 +88,8 @@ class AppFileConfig(BaseModel):
 
 
 class EnvConfig(BaseModel):
-    discord_bot_token: str = Field(alias="DISCORD_BOT_TOKEN")
+    discord_bot_token: str | None = Field(default=None, alias="DISCORD_BOT_TOKEN")
+    discord_guild_id: str | None = Field(default=None, alias="DISCORD_GUILD_ID")
     azure_ai_foundry_endpoint: str = Field(alias="AZURE_AI_FOUNDRY_ENDPOINT")
     azure_ai_foundry_key: str = Field(alias="AZURE_AI_FOUNDRY_KEY")
     azure_ai_foundry_api_version: str = Field(default="2024-10-21", alias="AZURE_AI_FOUNDRY_API_VERSION")
@@ -80,6 +98,20 @@ class EnvConfig(BaseModel):
     cosmos_db_database: str = Field(default="marco", alias="COSMOS_DB_DATABASE")
     cosmos_db_container: str = Field(default="conversation_memory", alias="COSMOS_DB_CONTAINER")
     cosmos_tasks_container: str = Field(default="tasks", alias="COSMOS_TASKS_CONTAINER")
+    cosmos_digest_container: str = Field(default="news_digest", alias="COSMOS_DIGEST_CONTAINER")
+    appinsights_connection_string: str | None = Field(
+        default=None,
+        alias="APPLICATIONINSIGHTS_CONNECTION_STRING",
+    )
+    news_rss_url: str = Field(
+        default=(
+            "https://news.google.com/rss/search?"
+            "q={query}&hl=en-US&gl=US&ceid=US:en"
+        ),
+        alias="NEWS_RSS_URL_TEMPLATE",
+    )
+    digest_timer_schedule: str = Field(default="0 30 2 * * *", alias="DIGEST_TIMER_SCHEDULE")
+    digest_open_tracking_base_url: str | None = Field(default=None, alias="DIGEST_OPEN_TRACKING_BASE_URL")
     port: int = Field(default=8080, alias="PORT")
 
 

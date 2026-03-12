@@ -123,6 +123,36 @@ class FoundryChatClient:
             assistant_message=assistant_message,
         )
 
+    async def embed_texts(self, *, deployment: str, texts: list[str]) -> list[list[float]]:
+        if not texts:
+            return []
+        payload = {
+            "model": deployment,
+            "input": texts,
+        }
+        try:
+            if self._client_mode == "openai_v1_compatible":
+                if self._openai_client is None:
+                    raise RuntimeError("OpenAI-compatible client not initialized.")
+                response = await self._openai_client.embeddings.create(**payload)
+            else:
+                if self._azure_client is None:
+                    raise RuntimeError("Azure deployment client not initialized.")
+                response = await self._azure_client.embeddings.create(**payload)
+        except Exception:
+            LOGGER.exception("Azure AI Foundry embedding call failed.")
+            return []
+
+        vectors: list[list[float]] = []
+        for item in getattr(response, "data", []) or []:
+            embedding = _read_value(item, "embedding")
+            if isinstance(embedding, list):
+                try:
+                    vectors.append([float(v) for v in embedding])
+                except (TypeError, ValueError):
+                    continue
+        return vectors
+
 
 def _extract_content(content: Any) -> str:
     if isinstance(content, str):

@@ -2,23 +2,23 @@
 
 This backlog is ordered for shipping a reliable v1 on Azure.
 
-## Phase 0 - Foundation (in progress)
+## Phase 0 - Foundation
 
 1. Done - Repository scaffold and dependency setup.
 2. Done - Config system with model profile list and active model routing.
 3. Done - Discord DM authorization gate with strict deny message.
 4. Done - Azure AI Foundry chat client wrapper.
 5. Done - Health probe endpoint for Container Apps.
-6. In progress - Cosmos DB memory persistence schema and retrieval.
+6. Done - Cosmos DB memory persistence schema and retrieval.
 
 ## Phase 1 - Core Assistant Loop
 
 1. Implement slash commands: `/task`, `/brief`, `/model`, `/memory`.
 2. Done - Tool-calling orchestration loop (`assistant -> tool -> assistant`) for grounded actions.
 3. Done - Task tool registry + execution handlers (model selects tools).
-4. In progress - Add conversation memory retrieval pipeline (recent + semantic).
-5. In progress - Add structured logs + correlation IDs + App Insights hooks.
-6. In progress - Add unit/integration tests for DM auth, config validation, model routing and tool routing.
+4. Done - Add conversation memory retrieval pipeline (recent + semantic).
+5. Done - Add structured logs + correlation IDs + App Insights hooks.
+6. Done - Add unit/integration tests for DM auth, config validation, model routing and tool routing.
 
 ## Phase 2 - Task Management (Cosmos-native)
 
@@ -26,16 +26,16 @@ This backlog is ordered for shipping a reliable v1 on Azure.
 2. Done - Implement task CRUD service with due dates, priority, tags.
 3. Done - Route task intents through real model tool calls (no fabricated task data).
 4. In progress - Add overdue task detector and morning summary formatter.
-5. Pending - Build Discord embed rendering for tasks.
+5. Done - Build Discord embed rendering for tasks.
 6. In progress - Add regression tests for task operations.
 
 ## Phase 3 - News Digest
 
-1. Add preferences model for digest time, timezone, and categories.
-2. Build Azure Function timer trigger for daily digest.
-3. Integrate grounding and source attribution flow.
-4. Implement "dig deeper" re-brief workflow.
-5. Track digest delivery and open rates in Cosmos.
+1. Done - Add preferences model for digest time, timezone, and categories.
+2. Done - Build Azure Function timer trigger for daily digest.
+3. Done - Integrate grounding and source attribution flow.
+4. Done - Implement "dig deeper" re-brief workflow.
+5. Done - Track digest delivery and open rates in Cosmos.
 
 ## Phase 4 - RAG File Understanding
 

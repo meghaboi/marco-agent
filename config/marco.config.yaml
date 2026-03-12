@@ -8,7 +8,18 @@ assistant:
   name: "Marco"
   allow_runtime_model_switch: false
   max_memory_messages: 20
+  max_semantic_memory_messages: 8
+  semantic_memory_enabled: true
   default_temperature: 0.25
+
+digest:
+  default_time_local: "08:30"
+  default_timezone: "Asia/Calcutta"
+  default_categories: ["geopolitics", "ai", "ml", "game development", "general"]
+  max_items: 5
+
+retrieval:
+  semantic_similarity_threshold: 0.65
 
 execution:
   codex:

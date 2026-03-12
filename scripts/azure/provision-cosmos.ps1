@@ -5,6 +5,7 @@ param(
   [string]$DatabaseName = "marco",
   [string]$MemoryContainer = "conversation_memory",
   [string]$TasksContainer = "tasks",
+  [string]$DigestContainer = "news_digest",
   [switch]$UpdateLocalEnv = $true
 )
 
@@ -117,6 +118,15 @@ az cosmosdb sql container create `
   --partition-key-path "/partition_key" `
   --output none
 
+Write-Host "Creating digest container (idempotent): $DigestContainer"
+az cosmosdb sql container create `
+  --account-name $AccountName `
+  --resource-group $ResourceGroupName `
+  --database-name $DatabaseName `
+  --name $DigestContainer `
+  --partition-key-path "/partition_key" `
+  --output none
+
 $endpoint = az cosmosdb show `
   --name $AccountName `
   --resource-group $ResourceGroupName `
@@ -140,6 +150,7 @@ if ($UpdateLocalEnv) {
   Set-Or-AddEnvValue -Path $envPath -Key "COSMOS_DB_DATABASE" -Value $DatabaseName
   Set-Or-AddEnvValue -Path $envPath -Key "COSMOS_DB_CONTAINER" -Value $MemoryContainer
   Set-Or-AddEnvValue -Path $envPath -Key "COSMOS_TASKS_CONTAINER" -Value $TasksContainer
+  Set-Or-AddEnvValue -Path $envPath -Key "COSMOS_DIGEST_CONTAINER" -Value $DigestContainer
 }
 
 Write-Host ""
@@ -150,6 +161,7 @@ Write-Host "Endpoint: $endpoint"
 Write-Host "Database: $DatabaseName"
 Write-Host "Memory Container: $MemoryContainer"
 Write-Host "Tasks Container: $TasksContainer"
+Write-Host "Digest Container: $DigestContainer"
 Write-Host ""
 Write-Host "Connection string assembled in-memory and values written to .env (if enabled)."
 Write-Host "Store COSMOS_DB_KEY in Azure Key Vault before production use."

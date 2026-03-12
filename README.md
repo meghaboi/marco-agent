@@ -12,7 +12,10 @@ This repo now includes a working foundation with strict access control, Azure AI
 - Routes chat and tool orchestration through Azure AI Foundry (`kimi-k2.5` by default).
 - Runtime model switching is disabled by default for stable routing.
 - Stores conversation memory in Cosmos DB (optional).
+- Adds semantic memory retrieval (recent + vector similarity) for richer context windows.
 - Stores and manages tasks in Cosmos DB (optional).
+- Supports grounded news digests with citations, preferences, and dig-deeper re-briefs.
+- Tracks digest deliveries and opens in Cosmos DB.
 - Exposes `/healthz` endpoint for Azure Container Apps liveness/readiness probes.
 
 ## Foundation Features Implemented
@@ -22,6 +25,7 @@ This repo now includes a working foundation with strict access control, Azure AI
 - Unauthorized access logging hook.
 - Task CRUD commands (`add/show/complete/delete`).
 - Typed config validation (YAML + environment vars via `pydantic`).
+- Structured logs with correlation IDs and optional App Insights sink.
 - Test coverage for config integrity + command parsing.
 
 ## Architecture (Current Slice)
@@ -139,6 +143,11 @@ tests/
 - `COSMOS_DB_DATABASE` (default `marco`)
 - `COSMOS_DB_CONTAINER` (default `conversation_memory`)
 - `COSMOS_TASKS_CONTAINER` (default `tasks`)
+- `COSMOS_DIGEST_CONTAINER` (default `news_digest`)
+- `APPLICATIONINSIGHTS_CONNECTION_STRING` (optional, for Azure Monitor/App Insights)
+- `NEWS_RSS_URL_TEMPLATE` (default Google News RSS search template)
+- `DIGEST_TIMER_SCHEDULE` (default `0 30 2 * * *` UTC)
+- `DIGEST_OPEN_TRACKING_BASE_URL` (optional)
 - `PORT` (default `8080`)
 
 ## DM Commands (Authorized User Only)
@@ -187,9 +196,17 @@ Run:
 
 ```bash
 python -m pytest -q
-python -m ruff check src tests
+python -m ruff check src tests functions
 python -m compileall src
 ```
+
+## Azure Functions (Phase 3 Digest)
+
+`functions/function_app.py` includes:
+
+- Timer trigger: `daily_digest_timer` (`%DIGEST_TIMER_SCHEDULE%`)
+- HTTP endpoint: `GET /api/digest/open` (open tracking pixel)
+- HTTP endpoint: `GET /api/digest/embed` (custom digest web card UI)
 
 ## Build Roadmap
 

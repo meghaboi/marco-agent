@@ -12,6 +12,7 @@ def test_load_file_config_smoke() -> None:
     assert cfg.active_models.chat == "kimi-k2.5"
     assert cfg.active_models.reasoning == "kimi-k2.5"
     assert cfg.assistant.allow_runtime_model_switch is False
+    assert cfg.get_deployment_for_capability("reasoning") == "Kimi-K2.5"
 
 
 def test_missing_profile_raises(tmp_path: Path) -> None:

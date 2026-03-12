@@ -87,3 +87,17 @@ def test_execute_task_tool_when_store_disabled() -> None:
     )
     assert result["ok"] is False
     assert "unavailable" in result["error"].lower()
+
+
+def test_execute_unknown_task_tool_returns_error() -> None:
+    store = StubTaskStore(enabled=True)
+    result = asyncio.run(
+        execute_task_tool_call(
+            task_store=store,  # type: ignore[arg-type]
+            user_id="u1",
+            tool_name="unknown_tool",
+            arguments_json="{}",
+        )
+    )
+    assert result["ok"] is False
+    assert "unknown task tool" in result["error"].lower()

@@ -13,6 +13,10 @@ from marco_agent.ai.foundry import FoundryChatClient
 from marco_agent.config import DEFAULT_CONFIG_PATH, load_env_config, load_file_config
 from marco_agent.discord_bot import MarcoDiscordBot
 from marco_agent.logging_config import configure_logging
+from marco_agent.observability import correlation_scope
+from marco_agent.services.memory_retrieval import MemoryRetrievalService
+from marco_agent.services.news_digest import NewsDigestService
+from marco_agent.storage.cosmos_digest import CosmosDigestStore
 from marco_agent.storage.cosmos_memory import CosmosMemoryStore
 from marco_agent.storage.cosmos_tasks import CosmosTaskStore
 
@@ -37,11 +41,11 @@ async def start_health_server(port: int) -> web.AppRunner:
 
 async def run() -> None:
     load_dotenv()
-    configure_logging()
+    env_config = load_env_config()
+    configure_logging(appinsights_connection_string=env_config.appinsights_connection_string)
 
     config_path = Path(os.environ.get("MARCO_CONFIG_PATH", str(DEFAULT_CONFIG_PATH)))
     file_config = load_file_config(config_path)
-    env_config = load_env_config()
 
     memory = CosmosMemoryStore(
         endpoint=env_config.cosmos_db_endpoint,
@@ -60,14 +64,35 @@ async def run() -> None:
         database_name=env_config.cosmos_db_database,
         container_name=env_config.cosmos_tasks_container,
     )
+    digest_store = CosmosDigestStore(
+        endpoint=env_config.cosmos_db_endpoint,
+        key=env_config.cosmos_db_key,
+        database_name=env_config.cosmos_db_database,
+        container_name=env_config.cosmos_digest_container,
+    )
+    memory_retrieval = MemoryRetrievalService(
+        memory_store=memory,
+        ai_client=ai_client,
+        file_config=file_config,
+    )
+    news_digest_service = NewsDigestService(
+        ai_client=ai_client,
+        digest_store=digest_store,
+        rss_url_template=env_config.news_rss_url,
+    )
     bot = MarcoDiscordBot(
         file_config=file_config,
         ai_client=ai_client,
         memory_store=memory,
         task_store=task_store,
+        digest_store=digest_store,
+        memory_retrieval=memory_retrieval,
+        news_digest_service=news_digest_service,
     )
 
     health_runner = await start_health_server(env_config.port)
+    if not env_config.discord_bot_token:
+        raise ValueError("DISCORD_BOT_TOKEN is required for discord bot runtime.")
 
     stop_event = asyncio.Event()
 
@@ -82,20 +107,21 @@ async def run() -> None:
     except NotImplementedError:
         LOGGER.warning("Signal handlers are not supported in this runtime.")
 
-    bot_task = asyncio.create_task(bot.start(env_config.discord_bot_token), name="discord-bot")
-    wait_task = asyncio.create_task(stop_event.wait(), name="stop-wait")
+    with correlation_scope(prefix="startup"):
+        bot_task = asyncio.create_task(bot.start(env_config.discord_bot_token), name="discord-bot")
+        wait_task = asyncio.create_task(stop_event.wait(), name="stop-wait")
 
-    done, _ = await asyncio.wait(
-        {bot_task, wait_task},
-        return_when=asyncio.FIRST_COMPLETED,
-    )
+        done, _ = await asyncio.wait(
+            {bot_task, wait_task},
+            return_when=asyncio.FIRST_COMPLETED,
+        )
 
-    for task in done:
-        if task is bot_task and task.exception():
-            raise task.exception()
+        for task in done:
+            if task is bot_task and task.exception():
+                raise task.exception()
 
-    await bot.close()
-    await health_runner.cleanup()
+        await bot.close()
+        await health_runner.cleanup()
     LOGGER.info("Marco shutdown complete.")
 
 
