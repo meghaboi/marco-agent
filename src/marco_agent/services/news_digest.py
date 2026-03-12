@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import urllib.parse
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from typing import Any
 import xml.etree.ElementTree as ET
@@ -50,17 +50,18 @@ class NewsDigestService:
             categories = ["world", "technology"]
         items = await self.fetch_news(categories=categories, max_items=max_items)
         summary = await self._compose_grounded_summary(deployment=deployment, items=items)
+        serialized_items = [asdict(item) for item in items]
         record = await asyncio.to_thread(
             self._digest_store.save_digest,
             user_id=user_id,
             summary=summary,
-            items=[item.__dict__ for item in items],
+            items=serialized_items,
             categories=categories,
         )
         return {
             "digest_id": record.get("digest_id", ""),
             "summary": summary,
-            "items": [item.__dict__ for item in items],
+            "items": serialized_items,
             "categories": categories,
             "created_at": record.get("created_at", datetime.now(UTC).isoformat()),
         }

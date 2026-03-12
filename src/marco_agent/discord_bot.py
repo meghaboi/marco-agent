@@ -124,7 +124,8 @@ class MarcoDiscordBot(commands.Bot):
             await self._handle_model_use(message, content)
             return
 
-        await self._respond_as_marco(message)
+        async with message.channel.typing():
+            await self._respond_as_marco(message)
 
     async def _handle_model_list(self, message: discord.Message) -> None:
         profile_map = self.file_config.profile_map()
