@@ -1,4 +1,5 @@
 import asyncio
+from datetime import UTC, datetime, timedelta
 
 from marco_agent.tools.task_tools import (
     TASK_TOOL_NAMES,
@@ -28,8 +29,10 @@ class StubTaskStore:
         return item
 
     def list_tasks(self, *, user_id, include_closed=False):
-        _ = include_closed
-        return [row for row in self.rows if row["user_id"] == user_id]
+        rows = [row for row in self.rows if row["user_id"] == user_id]
+        if include_closed:
+            return rows
+        return [row for row in rows if row["status"] != "done"]
 
     def complete_task(self, *, user_id, task_id):
         for row in self.rows:
@@ -101,3 +104,118 @@ def test_execute_unknown_task_tool_returns_error() -> None:
     )
     assert result["ok"] is False
     assert "unknown task tool" in result["error"].lower()
+
+
+def test_execute_complete_and_delete_regression_paths() -> None:
+    store = StubTaskStore(enabled=True)
+    asyncio.run(
+        execute_task_tool_call(
+            task_store=store,  # type: ignore[arg-type]
+            user_id="u1",
+            tool_name="task_add",
+            arguments_json='{"title":"Ship v1"}',
+        )
+    )
+
+    complete_ok = asyncio.run(
+        execute_task_tool_call(
+            task_store=store,  # type: ignore[arg-type]
+            user_id="u1",
+            tool_name="task_complete",
+            arguments_json='{"task_id":"abc12345"}',
+        )
+    )
+    assert complete_ok["ok"] is True
+
+    complete_miss = asyncio.run(
+        execute_task_tool_call(
+            task_store=store,  # type: ignore[arg-type]
+            user_id="u1",
+            tool_name="task_complete",
+            arguments_json='{"task_id":"missing"}',
+        )
+    )
+    assert complete_miss["ok"] is False
+
+    delete_ok = asyncio.run(
+        execute_task_tool_call(
+            task_store=store,  # type: ignore[arg-type]
+            user_id="u1",
+            tool_name="task_delete",
+            arguments_json='{"task_id":"abc12345"}',
+        )
+    )
+    assert delete_ok["ok"] is True
+
+    delete_miss = asyncio.run(
+        execute_task_tool_call(
+            task_store=store,  # type: ignore[arg-type]
+            user_id="u1",
+            tool_name="task_delete",
+            arguments_json='{"task_id":"missing"}',
+        )
+    )
+    assert delete_miss["ok"] is False
+
+
+def test_execute_task_actions_validate_missing_task_id() -> None:
+    store = StubTaskStore(enabled=True)
+    complete_result = asyncio.run(
+        execute_task_tool_call(
+            task_store=store,  # type: ignore[arg-type]
+            user_id="u1",
+            tool_name="task_complete",
+            arguments_json="{}",
+        )
+    )
+    assert complete_result["ok"] is False
+    assert "missing required field" in complete_result["error"].lower()
+
+    delete_result = asyncio.run(
+        execute_task_tool_call(
+            task_store=store,  # type: ignore[arg-type]
+            user_id="u1",
+            tool_name="task_delete",
+            arguments_json="{}",
+        )
+    )
+    assert delete_result["ok"] is False
+    assert "missing required field" in delete_result["error"].lower()
+
+
+def test_execute_task_morning_summary_detects_overdue() -> None:
+    store = StubTaskStore(enabled=True)
+    yesterday = (datetime.now(UTC) - timedelta(days=1)).date().isoformat()
+    tomorrow = (datetime.now(UTC) + timedelta(days=1)).date().isoformat()
+    store.rows.extend(
+        [
+            {
+                "id": "a1",
+                "user_id": "u1",
+                "title": "Late task",
+                "priority": "P1",
+                "due_at": yesterday,
+                "status": "open",
+            },
+            {
+                "id": "a2",
+                "user_id": "u1",
+                "title": "Future task",
+                "priority": "P2",
+                "due_at": tomorrow,
+                "status": "open",
+            },
+        ]
+    )
+    result = asyncio.run(
+        execute_task_tool_call(
+            task_store=store,  # type: ignore[arg-type]
+            user_id="u1",
+            tool_name="task_morning_summary",
+            arguments_json='{"timezone":"UTC"}',
+        )
+    )
+    assert result["ok"] is True
+    assert result["totals"]["open"] == 2
+    assert result["totals"]["overdue"] == 1
+    assert result["overdue_tasks"][0]["id"] == "a1"

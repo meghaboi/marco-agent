@@ -50,6 +50,26 @@ class RetrievalConfig(BaseModel):
     semantic_similarity_threshold: float = 0.65
 
 
+class RagConfig(BaseModel):
+    enabled: bool = True
+    max_file_size_mb: int = 12
+    chunk_size_chars: int = 1200
+    chunk_overlap_chars: int = 120
+    max_chunks_per_file: int = 80
+    default_project: str = "general"
+
+
+class GithubOpsConfig(BaseModel):
+    default_clone_base_dir: str = "./workspaces"
+    pr_checklist_template: str = "standard"
+
+
+class NgrokConfig(BaseModel):
+    enabled: bool = False
+    max_ttl_minutes: int = 120
+    api_url: str = "http://127.0.0.1:4040"
+
+
 class ModelProfile(BaseModel):
     id: str
     description: str
@@ -72,6 +92,9 @@ class AppFileConfig(BaseModel):
     execution: ExecutionConfig = Field(default_factory=ExecutionConfig)
     digest: DigestDefaultsConfig = Field(default_factory=DigestDefaultsConfig)
     retrieval: RetrievalConfig = Field(default_factory=RetrievalConfig)
+    rag: RagConfig = Field(default_factory=RagConfig)
+    github: GithubOpsConfig = Field(default_factory=GithubOpsConfig)
+    ngrok: NgrokConfig = Field(default_factory=NgrokConfig)
     model_profiles: list[ModelProfile]
     active_models: ActiveModels
     persona: PersonaConfig
@@ -99,6 +122,22 @@ class EnvConfig(BaseModel):
     cosmos_db_container: str = Field(default="conversation_memory", alias="COSMOS_DB_CONTAINER")
     cosmos_tasks_container: str = Field(default="tasks", alias="COSMOS_TASKS_CONTAINER")
     cosmos_digest_container: str = Field(default="news_digest", alias="COSMOS_DIGEST_CONTAINER")
+    cosmos_files_container: str = Field(default="files", alias="COSMOS_FILES_CONTAINER")
+    azure_blob_connection_string: str | None = Field(default=None, alias="AZURE_BLOB_CONNECTION_STRING")
+    azure_blob_container: str = Field(default="marco-files", alias="AZURE_BLOB_CONTAINER")
+    azure_search_endpoint: str | None = Field(default=None, alias="AZURE_SEARCH_ENDPOINT")
+    azure_search_key: str | None = Field(default=None, alias="AZURE_SEARCH_KEY")
+    azure_search_index: str = Field(default="marco-file-chunks", alias="AZURE_SEARCH_INDEX")
+    azure_search_api_version: str = Field(default="2024-07-01", alias="AZURE_SEARCH_API_VERSION")
+    azure_key_vault_url: str | None = Field(default=None, alias="AZURE_KEY_VAULT_URL")
+    github_token: str | None = Field(default=None, alias="GITHUB_TOKEN")
+    codex_account_token: str | None = Field(default=None, alias="CODEX_ACCOUNT_TOKEN")
+    ngrok_auth_token: str | None = Field(default=None, alias="NGROK_AUTH_TOKEN")
+    ngrok_binary: str = Field(default="ngrok", alias="NGROK_BINARY")
+    execution_runner_dry_run: bool = Field(default=False, alias="EXECUTION_RUNNER_DRY_RUN")
+    aca_job_resource_group: str | None = Field(default=None, alias="ACA_JOB_RESOURCE_GROUP")
+    aca_job_name: str | None = Field(default=None, alias="ACA_JOB_NAME")
+    aci_resource_group: str | None = Field(default=None, alias="ACI_RESOURCE_GROUP")
     appinsights_connection_string: str | None = Field(
         default=None,
         alias="APPLICATIONINSIGHTS_CONNECTION_STRING",
@@ -110,7 +149,7 @@ class EnvConfig(BaseModel):
         ),
         alias="NEWS_RSS_URL_TEMPLATE",
     )
-    digest_timer_schedule: str = Field(default="0 30 2 * * *", alias="DIGEST_TIMER_SCHEDULE")
+    digest_timer_schedule: str = Field(default="0 * * * * *", alias="DIGEST_TIMER_SCHEDULE")
     digest_open_tracking_base_url: str | None = Field(default=None, alias="DIGEST_OPEN_TRACKING_BASE_URL")
     port: int = Field(default=8080, alias="PORT")
 

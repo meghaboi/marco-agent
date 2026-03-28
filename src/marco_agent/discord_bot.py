@@ -15,10 +15,18 @@ from marco_agent.config import AppFileConfig
 from marco_agent.observability import correlation_scope, new_correlation_id
 from marco_agent.services.memory_retrieval import MemoryRetrievalService
 from marco_agent.services.news_digest import NewsDigestService
+from marco_agent.services.attachment_ingestion import AttachmentIngestionService
+from marco_agent.services.codex_execution import CodexAuthSessionManager, ExecutionJobRunner
+from marco_agent.services.github_ops import GitHubAuthProvider, GitHubWorkflowService
+from marco_agent.services.ngrok_manager import NgrokTunnelManager
+from marco_agent.services.rag_retrieval import RagRetrievalService
+from marco_agent.storage.cosmos_files import CosmosFileStore
 from marco_agent.storage.cosmos_digest import CosmosDigestStore
 from marco_agent.storage.cosmos_memory import CosmosMemoryStore
 from marco_agent.storage.cosmos_tasks import CosmosTaskStore
 from marco_agent.tools.news_tools import NEWS_TOOL_NAMES, execute_news_tool_call, news_tool_definitions
+from marco_agent.tools.ops_tools import OPS_TOOL_NAMES, execute_ops_tool_call, ops_tool_definitions
+from marco_agent.tools.rag_tools import RAG_TOOL_NAMES, execute_rag_tool_call, rag_tool_definitions
 from marco_agent.tools.task_tools import TASK_TOOL_NAMES, execute_task_tool_call, task_tool_definitions
 
 LOGGER = logging.getLogger(__name__)
@@ -65,8 +73,16 @@ class MarcoDiscordBot(commands.Bot):
         memory_store: CosmosMemoryStore,
         task_store: CosmosTaskStore,
         digest_store: CosmosDigestStore,
+        file_store: CosmosFileStore,
         memory_retrieval: MemoryRetrievalService,
         news_digest_service: NewsDigestService,
+        attachment_ingestion: AttachmentIngestionService,
+        rag_retrieval: RagRetrievalService,
+        github_auth: GitHubAuthProvider,
+        github_workflow: GitHubWorkflowService,
+        codex_auth: CodexAuthSessionManager,
+        execution_runner: ExecutionJobRunner,
+        ngrok: NgrokTunnelManager,
     ) -> None:
         intents = discord.Intents.default()
         intents.message_content = True
@@ -76,8 +92,16 @@ class MarcoDiscordBot(commands.Bot):
         self.memory_store = memory_store
         self.task_store = task_store
         self.digest_store = digest_store
+        self.file_store = file_store
         self.memory_retrieval = memory_retrieval
         self.news_digest_service = news_digest_service
+        self.attachment_ingestion = attachment_ingestion
+        self.rag_retrieval = rag_retrieval
+        self.github_auth = github_auth
+        self.github_workflow = github_workflow
+        self.codex_auth = codex_auth
+        self.execution_runner = execution_runner
+        self.ngrok = ngrok
         self.model_state = RuntimeModelState(
             chat=file_config.active_models.chat,
             reasoning=file_config.active_models.reasoning,
@@ -94,7 +118,11 @@ class MarcoDiscordBot(commands.Bot):
             return
         corr = new_correlation_id(prefix="dm")
         with correlation_scope(value=corr):
-            await self._on_message_scoped(message)
+            try:
+                await self._on_message_scoped(message)
+            except Exception:
+                LOGGER.exception("Discord DM handling failed for user_id=%s", getattr(message.author, "id", None))
+                await message.channel.send("I hit an internal error while processing that message. Please retry.")
 
     async def _on_message_scoped(self, message: discord.Message) -> None:
         LOGGER.info("Inbound DM received from user_id=%s", getattr(message.author, "id", None))
@@ -111,9 +139,32 @@ class MarcoDiscordBot(commands.Bot):
             LOGGER.warning("Unauthorized DM blocked from user %s", author_id)
             return
 
+        if message.attachments:
+            if self.attachment_ingestion.enabled:
+                attachment_results = await self.attachment_ingestion.ingest_discord_attachments(
+                    user_id=author_id,
+                    attachments=list(message.attachments),
+                )
+                lines = []
+                for row in attachment_results:
+                    if bool(row.get("ok")):
+                        lines.append(
+                            f"Indexed `{row.get('file_name', '')}` as `{row.get('file_id', '')}` "
+                            f"({row.get('chunk_count', 0)} chunks)."
+                        )
+                    else:
+                        lines.append(f"Attachment ingest failed: {row.get('error', 'unknown error')}")
+                if lines:
+                    await message.channel.send("\n".join(lines)[:1900])
+            else:
+                await message.channel.send("Attachments received, but RAG ingestion is not configured.")
+
         content = (message.content or "").strip()
         if not content:
-            await message.channel.send("Send a message or command, and I will handle it.")
+            if message.attachments:
+                await message.channel.send("Files ingested. Ask me to summarize, compare, or search them.")
+            else:
+                await message.channel.send("Send a message or command, and I will handle it.")
             return
 
         lowered = content.lower()
@@ -259,8 +310,11 @@ class MarcoDiscordBot(commands.Bot):
             "Tool-use policy:\n"
             "- For any task-related action (add/list/show/update/complete/delete/reprioritize), you MUST call task tools.\n"
             "- For digest operations (preferences, generate digest, open rate, dig deeper), you MUST call digest tools.\n"
+            "- For file search/summarize/compare requests, you MUST call RAG tools.\n"
+            "- For GitHub, execution, auth, or tunnel operations, you MUST call ops tools.\n"
             "- Never fabricate task lists, task IDs, statuses, or due dates.\n"
             "- Never fabricate news facts or sources. Use only grounded source URLs returned by tools.\n"
+            "- Never fabricate file citations. Use only chunk citations returned by tools.\n"
             "- If task tool output says unavailable/error, tell the user plainly and do not invent success.\n"
             "- After tool calls, provide a concise grounded response based only on tool outputs."
         )
@@ -288,7 +342,7 @@ class MarcoDiscordBot(commands.Bot):
         deployment: str,
         messages: list[dict[str, Any]],
     ) -> BotReply:
-        tools = task_tool_definitions() + news_tool_definitions()
+        tools = task_tool_definitions() + news_tool_definitions() + rag_tool_definitions() + ops_tool_definitions()
         work_messages = list(messages)
         tool_events: list[ToolEvent] = []
 
@@ -364,6 +418,28 @@ class MarcoDiscordBot(commands.Bot):
                 default_max_items=self.file_config.digest.max_items,
                 reasoning_deployment=reasoning_deployment,
             )
+        if call.name in RAG_TOOL_NAMES:
+            return await execute_rag_tool_call(
+                user_id=user_id,
+                tool_name=call.name,
+                arguments_json=call.arguments_json,
+                file_store=self.file_store,
+                attachment_ingestion=self.attachment_ingestion,
+                rag_retrieval=self.rag_retrieval,
+                reasoning_deployment=reasoning_deployment,
+            )
+        if call.name in OPS_TOOL_NAMES:
+            return await execute_ops_tool_call(
+                user_id=user_id,
+                tool_name=call.name,
+                arguments_json=call.arguments_json,
+                github_auth=self.github_auth,
+                github_workflow=self.github_workflow,
+                codex_auth=self.codex_auth,
+                execution_runner=self.execution_runner,
+                ngrok=self.ngrok,
+                pr_template=self.file_config.github.pr_checklist_template,
+            )
         return {"ok": False, "error": f"Unknown tool '{call.name}'."}
 
     @staticmethod
@@ -393,6 +469,10 @@ class MarcoDiscordBot(commands.Bot):
                     failure_title="Task Delete Failed",
                     failure_color=discord.Color.red(),
                 )
+            elif event.name == "task_morning_summary":
+                embed = _build_task_morning_summary_embed(event.output)
+            elif event.name in {"rag_list_files", "rag_search", "rag_summarize_file", "rag_compare_files"}:
+                embed = _build_rag_embed(event.name, event.output)
             elif event.name in {"digest_preferences_set", "digest_preferences_get"}:
                 embed = _build_digest_preferences_embed(event.output)
             elif event.name == "digest_generate_now":
@@ -525,6 +605,48 @@ def _build_error_embed(title: str, output: dict[str, Any]) -> discord.Embed:
     return embed
 
 
+def _build_task_morning_summary_embed(output: dict[str, Any]) -> discord.Embed:
+    if not bool(output.get("ok")):
+        return _build_error_embed("Morning Summary Unavailable", output)
+
+    summary = str(output.get("summary", "")).strip() or "Task summary generated."
+    timezone = str(output.get("timezone", "UTC")).strip() or "UTC"
+    totals = output.get("totals")
+    open_count = 0
+    overdue_count = 0
+    due_today_count = 0
+    if isinstance(totals, dict):
+        open_count = int(totals.get("open", 0))
+        overdue_count = int(totals.get("overdue", 0))
+        due_today_count = int(totals.get("due_today", 0))
+
+    embed = discord.Embed(
+        title="Morning Task Summary",
+        description=summary[:2048],
+        color=discord.Color.gold(),
+    )
+    embed.add_field(name="Timezone", value=f"`{timezone}`", inline=True)
+    embed.add_field(name="Open", value=str(open_count), inline=True)
+    embed.add_field(name="Overdue", value=str(overdue_count), inline=True)
+    embed.add_field(name="Due Today", value=str(due_today_count), inline=True)
+
+    overdue = output.get("overdue_tasks")
+    if isinstance(overdue, list) and overdue:
+        lines: list[str] = []
+        for task in overdue[:5]:
+            if not isinstance(task, dict):
+                continue
+            task_id = str(task.get("id", "")).strip() or "unknown"
+            title = str(task.get("title", "")).strip() or "(untitled)"
+            priority = str(task.get("priority", "P2")).upper().strip() or "P2"
+            due_at = str(task.get("due_at", "")).strip() or "-"
+            lines.append(f"`{task_id}` | `{priority}` | due `{due_at}`")
+            lines.append(title[:120])
+        if lines:
+            embed.add_field(name="Top Overdue", value="\n".join(lines)[:1024], inline=False)
+    return embed
+
+
 def _build_digest_preferences_embed(output: dict[str, Any]) -> discord.Embed:
     if not bool(output.get("ok")):
         return _build_error_embed("Digest Preferences Error", output)
@@ -544,6 +666,67 @@ def _build_digest_preferences_embed(output: dict[str, Any]) -> discord.Embed:
     embed.add_field(name="Timezone", value=f"`{timezone}`", inline=True)
     embed.add_field(name="Categories", value=category_text[:1024], inline=False)
     return embed
+
+
+def _build_rag_embed(tool_name: str, output: dict[str, Any]) -> discord.Embed:
+    if not bool(output.get("ok")):
+        return _build_error_embed("RAG Operation Failed", output)
+    if tool_name == "rag_list_files":
+        rows = output.get("files")
+        if not isinstance(rows, list):
+            rows = []
+        embed = discord.Embed(
+            title="Indexed Files",
+            description=f"{len(rows)} file(s) available.",
+            color=discord.Color.dark_blue(),
+        )
+        lines: list[str] = []
+        for row in rows[:10]:
+            if not isinstance(row, dict):
+                continue
+            file_id = str(row.get("file_id", "")).strip() or "unknown"
+            name = str(row.get("file_name", "")).strip() or "(unnamed)"
+            project = str(row.get("project", "")).strip() or "general"
+            lines.append(f"`{file_id}` | {name} | project `{project}`")
+        embed.add_field(name="Files", value="\n".join(lines)[:1024] or "No files.", inline=False)
+        return embed
+    if tool_name == "rag_search":
+        citations = output.get("citations")
+        if not isinstance(citations, list):
+            citations = []
+        embed = discord.Embed(
+            title="File Retrieval",
+            description=f"{len(citations)} citation(s) found.",
+            color=discord.Color.dark_blue(),
+        )
+        rows: list[str] = []
+        for idx, citation in enumerate(citations[:5], start=1):
+            if not isinstance(citation, dict):
+                continue
+            file_name = str(citation.get("file_name", "")).strip() or "file"
+            chunk_id = str(citation.get("chunk_id", "")).strip() or "chunk"
+            snippet = str(citation.get("snippet", "")).strip().replace("\n", " ")
+            rows.append(f"[{idx}] `{file_name}` `{chunk_id}` - {snippet[:130]}")
+        embed.add_field(name="Citations", value="\n".join(rows)[:1024] or "-", inline=False)
+        return embed
+    if tool_name == "rag_summarize_file":
+        embed = discord.Embed(
+            title="File Summary",
+            description=str(output.get("summary", ""))[:2048] or "No summary.",
+            color=discord.Color.dark_teal(),
+        )
+        embed.add_field(name="File ID", value=f"`{str(output.get('file_id', 'unknown'))}`", inline=True)
+        return embed
+    if tool_name == "rag_compare_files":
+        embed = discord.Embed(
+            title="File Comparison",
+            description=str(output.get("comparison", ""))[:2048] or "No comparison.",
+            color=discord.Color.dark_magenta(),
+        )
+        embed.add_field(name="File A", value=f"`{str(output.get('file_id_a', 'unknown'))}`", inline=True)
+        embed.add_field(name="File B", value=f"`{str(output.get('file_id_b', 'unknown'))}`", inline=True)
+        return embed
+    return _build_error_embed("RAG Operation Failed", {"error": "Unhandled embed type."})
 
 
 def _build_digest_embed(output: dict[str, Any]) -> discord.Embed:

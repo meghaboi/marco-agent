@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from azure.cosmos import CosmosClient, PartitionKey
+from azure.cosmos.exceptions import CosmosResourceNotFoundError
 
 LOGGER = logging.getLogger(__name__)
 
@@ -152,21 +153,35 @@ class CosmosDigestStore:
         digest_id: str,
         channel: str,
         status: str,
+        delivery_key: str | None = None,
     ) -> None:
         if self._container is None:
             return
         now = datetime.now(UTC).isoformat()
         item = {
-            "id": f"delivery-{digest_id}-{uuid.uuid4().hex[:6]}",
+            "id": f"delivery-{delivery_key}" if delivery_key else f"delivery-{digest_id}-{uuid.uuid4().hex[:6]}",
             "partition_key": f"user:{user_id}",
             "kind": "digest_delivery",
             "user_id": user_id,
             "digest_id": digest_id,
             "channel": channel,
             "status": status,
+            "delivery_key": delivery_key,
             "created_at": now,
         }
+        if delivery_key:
+            self._container.upsert_item(item)
+            return
         self._container.create_item(item)
+
+    def has_delivery_key(self, *, user_id: str, delivery_key: str) -> bool:
+        if self._container is None:
+            return False
+        try:
+            self._container.read_item(item=f"delivery-{delivery_key}", partition_key=f"user:{user_id}")
+        except CosmosResourceNotFoundError:
+            return False
+        return True
 
     def track_open(self, *, user_id: str, digest_id: str, source: str) -> None:
         if self._container is None:

@@ -16,6 +16,16 @@ from marco_agent.logging_config import configure_logging
 from marco_agent.observability import correlation_scope
 from marco_agent.services.memory_retrieval import MemoryRetrievalService
 from marco_agent.services.news_digest import NewsDigestService
+from marco_agent.services.ai_search import AiSearchService
+from marco_agent.services.attachment_ingestion import AttachmentIngestionService
+from marco_agent.services.blob_storage import BlobStorageService
+from marco_agent.services.codex_execution import CodexAuthSessionManager, ExecutionJobRunner
+from marco_agent.services.github_ops import GitHubAuthProvider, GitHubWorkflowService
+from marco_agent.services.ngrok_manager import NgrokTunnelManager
+from marco_agent.services.rag_indexing import RagIndexingService
+from marco_agent.services.rag_retrieval import RagRetrievalService
+from marco_agent.services.secrets_provider import KeyVaultSecretProvider
+from marco_agent.storage.cosmos_files import CosmosFileStore
 from marco_agent.storage.cosmos_digest import CosmosDigestStore
 from marco_agent.storage.cosmos_memory import CosmosMemoryStore
 from marco_agent.storage.cosmos_tasks import CosmosTaskStore
@@ -70,6 +80,12 @@ async def run() -> None:
         database_name=env_config.cosmos_db_database,
         container_name=env_config.cosmos_digest_container,
     )
+    file_store = CosmosFileStore(
+        endpoint=env_config.cosmos_db_endpoint,
+        key=env_config.cosmos_db_key,
+        database_name=env_config.cosmos_db_database,
+        container_name=env_config.cosmos_files_container,
+    )
     memory_retrieval = MemoryRetrievalService(
         memory_store=memory,
         ai_client=ai_client,
@@ -80,14 +96,91 @@ async def run() -> None:
         digest_store=digest_store,
         rss_url_template=env_config.news_rss_url,
     )
+    search_service = AiSearchService(
+        endpoint=env_config.azure_search_endpoint,
+        api_key=env_config.azure_search_key,
+        index_name=env_config.azure_search_index,
+        api_version=env_config.azure_search_api_version,
+    )
+    if search_service.enabled:
+        ensured = await search_service.ensure_index()
+        if not ensured:
+            LOGGER.warning("Azure AI Search index bootstrap failed; RAG indexing/search may be degraded.")
+    blob_service = BlobStorageService(
+        connection_string=env_config.azure_blob_connection_string,
+        container_name=env_config.azure_blob_container,
+    )
+    embedding_deployment = file_config.get_deployment_for_capability("embeddings")
+    rag_indexing = RagIndexingService(
+        ai_client=ai_client,
+        file_store=file_store,
+        ai_search=search_service,
+        embedding_deployment=embedding_deployment,
+        chunk_size_chars=file_config.rag.chunk_size_chars,
+        chunk_overlap_chars=file_config.rag.chunk_overlap_chars,
+        max_chunks_per_file=file_config.rag.max_chunks_per_file,
+    )
+    rag_retrieval = RagRetrievalService(
+        ai_client=ai_client,
+        file_store=file_store,
+        ai_search=search_service,
+        embedding_deployment=embedding_deployment,
+    )
+    attachment_ingestion = AttachmentIngestionService(
+        blob_storage=blob_service,
+        file_store=file_store,
+        rag_indexing=rag_indexing,
+        default_project=file_config.rag.default_project,
+        max_file_size_mb=file_config.rag.max_file_size_mb,
+    )
+    secrets = KeyVaultSecretProvider(vault_url=env_config.azure_key_vault_url)
+    github_auth = GitHubAuthProvider(secret_provider=secrets)
+    if env_config.github_token:
+        github_auth.set_user_token(
+            user_id=file_config.security.authorized_discord_user_id,
+            token=env_config.github_token,
+        )
+    if env_config.codex_account_token:
+        secrets.set_secret(
+            key=f"MARCO-CODEX-TOKEN-{file_config.security.authorized_discord_user_id}",
+            value=env_config.codex_account_token,
+        )
+    github_workflow = GitHubWorkflowService(
+        auth_provider=github_auth,
+        clone_base_dir=file_config.github.default_clone_base_dir,
+    )
+    codex_auth = CodexAuthSessionManager(
+        secret_provider=secrets,
+        default_ttl_minutes=file_config.execution.codex.session_ttl_minutes,
+    )
+    execution_runner = ExecutionJobRunner(
+        aca_job_name=env_config.aca_job_name,
+        aca_resource_group=env_config.aca_job_resource_group,
+        aci_resource_group=env_config.aci_resource_group,
+        execute_commands=not env_config.execution_runner_dry_run,
+    )
+    ngrok = NgrokTunnelManager(
+        binary=env_config.ngrok_binary,
+        auth_token=env_config.ngrok_auth_token,
+        max_ttl_minutes=file_config.ngrok.max_ttl_minutes,
+        api_url=file_config.ngrok.api_url,
+    )
     bot = MarcoDiscordBot(
         file_config=file_config,
         ai_client=ai_client,
         memory_store=memory,
         task_store=task_store,
         digest_store=digest_store,
+        file_store=file_store,
         memory_retrieval=memory_retrieval,
         news_digest_service=news_digest_service,
+        attachment_ingestion=attachment_ingestion,
+        rag_retrieval=rag_retrieval,
+        github_auth=github_auth,
+        github_workflow=github_workflow,
+        codex_auth=codex_auth,
+        execution_runner=execution_runner,
+        ngrok=ngrok,
     )
 
     health_runner = await start_health_server(env_config.port)

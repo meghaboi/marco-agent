@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import UTC, datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from marco_agent.storage.cosmos_tasks import CosmosTaskStore
 
-TASK_TOOL_NAMES = {"task_add", "task_list", "task_complete", "task_delete"}
+TASK_TOOL_NAMES = {"task_add", "task_list", "task_complete", "task_delete", "task_morning_summary"}
 
 
 def task_tool_definitions() -> list[dict[str, Any]]:
@@ -89,6 +91,23 @@ def task_tool_definitions() -> list[dict[str, Any]]:
                 },
             },
         },
+        {
+            "type": "function",
+            "function": {
+                "name": "task_morning_summary",
+                "description": "Generate a morning task summary including overdue items.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "timezone": {
+                            "type": "string",
+                            "description": "Optional IANA timezone. Defaults to UTC.",
+                        }
+                    },
+                    "additionalProperties": False,
+                },
+            },
+        },
     ]
 
 
@@ -140,6 +159,14 @@ async def execute_task_tool_call(
                 return {"ok": False, "error": "Missing required field: task_id."}
             deleted = await asyncio.to_thread(task_store.delete_task, user_id=user_id, task_id=task_id)
             return {"ok": bool(deleted), "task_id": task_id}
+        if tool_name == "task_morning_summary":
+            tasks = await asyncio.to_thread(
+                task_store.list_tasks,
+                user_id=user_id,
+                include_closed=False,
+            )
+            timezone = _as_optional_str(args.get("timezone")) or "UTC"
+            return _build_morning_summary_payload(tasks=tasks, timezone=timezone)
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
 
@@ -174,3 +201,93 @@ def _as_str_list(value: Any) -> list[str]:
     if isinstance(value, str):
         return [tag.strip() for tag in value.split(",") if tag.strip()]
     return []
+
+
+def _build_morning_summary_payload(*, tasks: list[dict[str, Any]], timezone: str) -> dict[str, Any]:
+    try:
+        zone = ZoneInfo(timezone)
+    except Exception:
+        return {"ok": False, "error": f"Invalid timezone '{timezone}'."}
+
+    now_local = datetime.now(UTC).astimezone(zone)
+    today = now_local.date()
+    open_count = len(tasks)
+    overdue: list[dict[str, Any]] = []
+    due_today_count = 0
+
+    for task in tasks:
+        due_at = _as_optional_str(task.get("due_at"))
+        if not due_at:
+            continue
+        due_local = _parse_due_at_to_local(due_at=due_at, zone=zone)
+        if due_local is None:
+            continue
+        if due_local < now_local:
+            overdue.append(task)
+            continue
+        if due_local.date() == today:
+            due_today_count += 1
+
+    overdue = sorted(overdue, key=_summary_task_sort_key)
+    top_overdue = overdue[:5]
+    headline = (
+        f"You have {open_count} open task(s): {len(overdue)} overdue, "
+        f"{due_today_count} due today."
+    )
+    return {
+        "ok": True,
+        "timezone": timezone,
+        "generated_at": now_local.isoformat(),
+        "summary": headline,
+        "totals": {
+            "open": open_count,
+            "overdue": len(overdue),
+            "due_today": due_today_count,
+        },
+        "overdue_tasks": [
+            {
+                "id": str(task.get("id", "")).strip(),
+                "title": str(task.get("title", "")).strip(),
+                "priority": str(task.get("priority", "P2")).upper(),
+                "due_at": _as_optional_str(task.get("due_at")),
+            }
+            for task in top_overdue
+        ],
+    }
+
+
+def _parse_due_at_to_local(*, due_at: str, zone: ZoneInfo) -> datetime | None:
+    text = due_at.strip()
+    if not text:
+        return None
+    if len(text) == 10:
+        try:
+            date_part = datetime.strptime(text, "%Y-%m-%d").date()
+        except ValueError:
+            return None
+        return datetime(
+            year=date_part.year,
+            month=date_part.month,
+            day=date_part.day,
+            hour=23,
+            minute=59,
+            second=59,
+            tzinfo=zone,
+        )
+
+    normalized = text.replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=zone)
+    return parsed.astimezone(zone)
+
+
+def _summary_task_sort_key(task: dict[str, Any]) -> tuple[int, str, str]:
+    priority_order = {"P0": 0, "P1": 1, "P2": 2, "P3": 3}
+    priority = priority_order.get(str(task.get("priority", "P3")).upper(), 3)
+    due = str(task.get("due_at", "")).strip() or "9999-12-31T23:59:59Z"
+    task_id = str(task.get("id", "")).strip()
+    return (priority, due, task_id)

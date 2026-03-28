@@ -14,6 +14,7 @@ from marco_agent.config import DEFAULT_CONFIG_PATH, load_env_config, load_file_c
 from marco_agent.logging_config import configure_logging
 from marco_agent.observability import correlation_scope, new_correlation_id
 from marco_agent.services.digest_scheduler import DigestScheduler
+from marco_agent.services.discord_delivery import DiscordDeliveryService
 from marco_agent.services.news_digest import NewsDigestService
 from marco_agent.storage.cosmos_digest import CosmosDigestStore
 
@@ -57,6 +58,7 @@ def _get_runtime() -> dict[str, Any]:
         digest_store=digest_store,
         digest_service=digest_service,
         file_config=file_cfg,
+        discord_delivery=DiscordDeliveryService(bot_token=env.discord_bot_token),
     )
     _RUNTIME = {
         "env": env,

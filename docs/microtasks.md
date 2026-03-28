@@ -25,9 +25,9 @@ This backlog is ordered for shipping a reliable v1 on Azure.
 1. Done - Design and apply `tasks` container schema.
 2. Done - Implement task CRUD service with due dates, priority, tags.
 3. Done - Route task intents through real model tool calls (no fabricated task data).
-4. In progress - Add overdue task detector and morning summary formatter.
+4. Done - Add overdue task detector and morning summary formatter.
 5. Done - Build Discord embed rendering for tasks.
-6. In progress - Add regression tests for task operations.
+6. Done - Add regression tests for task operations.
 
 ## Phase 3 - News Digest
 
@@ -39,20 +39,20 @@ This backlog is ordered for shipping a reliable v1 on Azure.
 
 ## Phase 4 - RAG File Understanding
 
-1. Build Discord attachment ingestion and Blob Storage upload.
-2. Add chunking + embedding indexing pipeline to Azure AI Search.
-3. Build retrieval service with source citations.
-4. Add file-to-project mapping and metadata tags.
-5. Add compare/summarize commands and tests.
+1. Done - Build Discord attachment ingestion and Blob Storage upload.
+2. Done - Add chunking + embedding indexing pipeline to Azure AI Search.
+3. Done - Build retrieval service with source citations.
+4. Done - Add file-to-project mapping and metadata tags.
+5. Done - Add compare/summarize commands and tests.
 
 ## Phase 5 - GitHub + Execution + ngrok
 
-1. Add Key Vault-backed GitHub auth provider.
-2. Add Codex account-auth flow for code execution sessions (interactive one-time login + token persistence in Key Vault).
-3. Implement clone/change/branch/commit/push workflow.
-4. Build PR generator with checklist templates.
-5. Add execution job runner on Container Apps Job / ACI.
-6. Add ngrok tunnel manager with 2-hour TTL policy.
+1. Done - Add Key Vault-backed GitHub auth provider.
+2. Done - Add Codex account-auth flow for code execution sessions (interactive one-time login + token persistence in Key Vault).
+3. Done - Implement clone/change/branch/commit/push workflow.
+4. Done - Build PR generator with checklist templates.
+5. Done - Add execution job runner on Container Apps Job / ACI.
+6. Done - Add ngrok tunnel manager with 2-hour TTL policy.
 
 ## Phase 6 - Voice, Video, X, Blog
 

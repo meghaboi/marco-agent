@@ -16,6 +16,9 @@ This repo now includes a working foundation with strict access control, Azure AI
 - Stores and manages tasks in Cosmos DB (optional).
 - Supports grounded news digests with citations, preferences, and dig-deeper re-briefs.
 - Tracks digest deliveries and opens in Cosmos DB.
+- Ingests Discord attachments into Blob Storage and indexes text chunks for RAG retrieval.
+- Provides RAG tools for cited retrieval, file summarize, and file compare workflows.
+- Provides GitHub/execution ops tools (Key Vault-backed auth, clone/branch/commit/push, PR template generation, ngrok TTL-managed tunnels).
 - Exposes `/healthz` endpoint for Azure Container Apps liveness/readiness probes.
 
 ## Foundation Features Implemented
@@ -74,12 +77,22 @@ src/marco_agent/
   config.py                  # YAML + env validation models
   discord_bot.py             # DM handler, auth gate, model/task commands
   main.py                    # App entrypoint and health server
+  services/
+    attachment_ingestion.py  # Discord attachments -> Blob upload + index
+    rag_indexing.py          # Chunking + embeddings + Azure AI Search indexing
+    rag_retrieval.py         # Retrieval with source citations + summarize/compare
+    github_ops.py            # GitHub auth + clone/branch/commit/push + PR body helper
+    codex_execution.py       # Codex interactive auth + execution runner commands
+    ngrok_manager.py         # ngrok tunnel manager with TTL policy
   storage/
     cosmos_memory.py         # Conversation + unauthorized logs
     cosmos_tasks.py          # Task CRUD backend
+    cosmos_files.py          # File metadata and chunk records
 tests/
   test_config.py
-  test_task_parser.py
+  test_task_tools.py
+  test_rag_tools.py
+  test_ops_tools.py
 ```
 
 ## Prerequisites
@@ -144,9 +157,18 @@ tests/
 - `COSMOS_DB_CONTAINER` (default `conversation_memory`)
 - `COSMOS_TASKS_CONTAINER` (default `tasks`)
 - `COSMOS_DIGEST_CONTAINER` (default `news_digest`)
+- `COSMOS_FILES_CONTAINER` (default `files`)
+- `AZURE_BLOB_CONNECTION_STRING` / `AZURE_BLOB_CONTAINER`
+- `AZURE_SEARCH_ENDPOINT` / `AZURE_SEARCH_KEY` / `AZURE_SEARCH_INDEX` / `AZURE_SEARCH_API_VERSION`
+- `AZURE_KEY_VAULT_URL`
+- `GITHUB_TOKEN` (optional bootstrap token)
+- `CODEX_ACCOUNT_TOKEN` (optional bootstrap token)
+- `NGROK_AUTH_TOKEN` / `NGROK_BINARY`
+- `EXECUTION_RUNNER_DRY_RUN` (default `false`; set `true` to preview Azure CLI commands)
+- `ACA_JOB_RESOURCE_GROUP` / `ACA_JOB_NAME` / `ACI_RESOURCE_GROUP`
 - `APPLICATIONINSIGHTS_CONNECTION_STRING` (optional, for Azure Monitor/App Insights)
 - `NEWS_RSS_URL_TEMPLATE` (default Google News RSS search template)
-- `DIGEST_TIMER_SCHEDULE` (default `0 30 2 * * *` UTC)
+- `DIGEST_TIMER_SCHEDULE` (default `0 * * * * *`, every minute)
 - `DIGEST_OPEN_TRACKING_BASE_URL` (optional)
 - `PORT` (default `8080`)
 
@@ -170,6 +192,13 @@ tests/
 ### Natural conversation
 
 Any other DM is handled by Azure AI Foundry with persona + recent memory context.
+
+### RAG and Ops flows
+
+- Upload files directly in DM; Marco ingests attachments and indexes text chunks.
+- Ask natural-language retrieval questions and Marco returns grounded citations.
+- Ask for file summarize/compare and Marco routes through RAG tools.
+- Ask for GitHub/execution tasks and Marco routes through ops tools (auth, workflow, PR template, jobs, ngrok).
 
 ## Security Model
 
@@ -198,6 +227,7 @@ Run:
 python -m pytest -q
 python -m ruff check src tests functions
 python -m compileall src
+python scripts/e2e/smoke.py --config config/marco.config.yaml
 ```
 
 ## Azure Functions (Phase 3 Digest)
@@ -205,6 +235,7 @@ python -m compileall src
 `functions/function_app.py` includes:
 
 - Timer trigger: `daily_digest_timer` (`%DIGEST_TIMER_SCHEDULE%`)
+  - This must poll at least every minute so per-user local times like `07:15` can be honored.
 - HTTP endpoint: `GET /api/digest/open` (open tracking pixel)
 - HTTP endpoint: `GET /api/digest/embed` (custom digest web card UI)
 

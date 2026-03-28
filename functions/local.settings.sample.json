@@ -3,6 +3,6 @@
   "Values": {
     "AzureWebJobsStorage": "UseDevelopmentStorage=true",
     "FUNCTIONS_WORKER_RUNTIME": "python",
-    "DIGEST_TIMER_SCHEDULE": "0 30 2 * * *"
+    "DIGEST_TIMER_SCHEDULE": "0 * * * * *"
   }
 }

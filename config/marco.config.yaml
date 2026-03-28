@@ -21,11 +21,28 @@ digest:
 retrieval:
   semantic_similarity_threshold: 0.65
 
+rag:
+  enabled: true
+  max_file_size_mb: 12
+  chunk_size_chars: 1200
+  chunk_overlap_chars: 120
+  max_chunks_per_file: 80
+  default_project: "general"
+
 execution:
   codex:
     enabled: false
     auth_mode: "interactive_login"
     session_ttl_minutes: 120
+
+github:
+  default_clone_base_dir: "./workspaces"
+  pr_checklist_template: "standard"
+
+ngrok:
+  enabled: false
+  max_ttl_minutes: 120
+  api_url: "http://127.0.0.1:4040"
 
 model_profiles:
   - id: "deepseek-3.2"
