@@ -27,9 +27,9 @@ class StubCodexAuth:
         _ = user_id
         return {"ok": "true", "verification_code": "abc", "expires_at": "2026-03-28T00:00:00+00:00"}
 
-    def complete_interactive_login(self, *, user_id, verification_code, token):
+    def complete_interactive_login(self, *, user_id, verification_code, token=None):
         _ = user_id
-        if verification_code == "abc" and token:
+        if verification_code == "abc":
             return {"ok": "true"}
         return {"ok": "false", "error": "bad"}
 
@@ -126,6 +126,20 @@ def test_execute_ops_tools_core_paths() -> None:
         )
     )
     assert codex_begin["ok"] is True
+    codex_complete = asyncio.run(
+        execute_ops_tool_call(
+            user_id="u1",
+            tool_name="codex_auth_complete",
+            arguments_json='{"verification_code":"abc"}',
+            github_auth=auth,  # type: ignore[arg-type]
+            github_workflow=workflow,  # type: ignore[arg-type]
+            codex_auth=codex,  # type: ignore[arg-type]
+            execution_runner=runner,  # type: ignore[arg-type]
+            ngrok=ngrok,  # type: ignore[arg-type]
+            pr_template="standard",
+        )
+    )
+    assert codex_complete["ok"] is True
 
     tunnel = asyncio.run(
         execute_ops_tool_call(

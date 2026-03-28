@@ -28,10 +28,10 @@ class CodexAuthSessionManager:
             "ok": "true",
             "verification_code": code,
             "expires_at": expires_at.isoformat(),
-            "instructions": "Complete auth then call codex_auth_complete with verification_code and token.",
+            "instructions": "Complete auth then call codex_auth_complete with verification_code.",
         }
 
-    def complete_interactive_login(self, *, user_id: str, verification_code: str, token: str) -> dict[str, str]:
+    def complete_interactive_login(self, *, user_id: str, verification_code: str, token: str | None = None) -> dict[str, str]:
         pending = self._pending.get(user_id)
         if not pending:
             return {"ok": "false", "error": "No pending auth session."}
@@ -40,9 +40,16 @@ class CodexAuthSessionManager:
             return {"ok": "false", "error": "Auth session expired."}
         if verification_code.strip() != pending.code:
             return {"ok": "false", "error": "Invalid verification_code."}
-        self._secret_provider.set_secret(key=f"MARCO-CODEX-TOKEN-{user_id}", value=token.strip())
+        value = (token or "").strip()
+        if value:
+            self._secret_provider.set_secret(key=f"MARCO-CODEX-TOKEN-{user_id}", value=value)
+        else:
+            self._secret_provider.set_secret(
+                key=f"MARCO-CODEX-TOKEN-{user_id}",
+                value=f"device-auth-completed:{datetime.now(UTC).isoformat()}",
+            )
         self._pending.pop(user_id, None)
-        return {"ok": "true", "message": "Codex token persisted."}
+        return {"ok": "true", "message": "Codex auth completed and persisted."}
 
     def get_token(self, *, user_id: str) -> str | None:
         return self._secret_provider.get_secret(key=f"MARCO-CODEX-TOKEN-{user_id}")

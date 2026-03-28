@@ -100,14 +100,14 @@ def ops_tool_definitions() -> list[dict[str, Any]]:
             "type": "function",
             "function": {
                 "name": "codex_auth_complete",
-                "description": "Finish Codex auth flow and persist token to Key Vault-backed secrets.",
+                "description": "Finish Codex auth flow and persist completion to Key Vault-backed secrets.",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "verification_code": {"type": "string"},
                         "token": {"type": "string"},
                     },
-                    "required": ["verification_code", "token"],
+                    "required": ["verification_code"],
                     "additionalProperties": False,
                 },
             },
@@ -221,7 +221,7 @@ async def execute_ops_tool_call(
             row = codex_auth.complete_interactive_login(
                 user_id=user_id,
                 verification_code=str(args.get("verification_code", "")).strip(),
-                token=str(args.get("token", "")).strip(),
+                token=_as_optional_str(args.get("token")),
             )
             return {**row, "ok": row.get("ok") == "true"}
         if tool_name == "execution_run_job":
