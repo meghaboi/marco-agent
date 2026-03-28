@@ -100,12 +100,11 @@ def ops_tool_definitions() -> list[dict[str, Any]]:
             "type": "function",
             "function": {
                 "name": "codex_auth_complete",
-                "description": "Finish Codex auth flow and persist completion to Key Vault-backed secrets.",
+                "description": "Finish Codex auth flow using verification_code only.",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "verification_code": {"type": "string"},
-                        "token": {"type": "string"},
                     },
                     "required": ["verification_code"],
                     "additionalProperties": False,
